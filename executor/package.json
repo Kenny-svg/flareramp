@@ -1,0 +1,35 @@
+{
+  "name": "flareramp-executor",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    "./flare-contracts": "./src/flareContracts.ts",
+    "./mint-readiness": "./src/mintReadiness.ts",
+    "./proof-receipt-fixture": "./fixtures/proof-receipt.coston2.json",
+    "./xaman-direct-mint": "./src/xamanDirectMint.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx watch src/index.ts",
+    "integration:prepare": "tsx src/coston2Integration.ts prepare",
+    "integration:settle": "tsx src/coston2Integration.ts settle",
+    "start": "tsx src/index.ts",
+    "test": "vitest run src",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@flarenetwork/flare-periphery-contract-artifacts": "^0.1.52",
+    "@flarenetwork/flare-wagmi-periphery-package": "^3.6.0",
+    "dotenv": "^16.4.5",
+    "viem": "^2.19.0",
+    "xrpl": "^3.1.0",
+    "xumm": "^1.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.4.5",
+    "vitest": "^4.1.10"
+  }
+}
