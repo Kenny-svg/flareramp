@@ -1,0 +1,22 @@
+{
+  "name": "flareramp",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "web",
+    "contracts",
+    "executor"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=executor && npm run compile --workspace=contracts && npm run build --workspace=web",
+    "dev": "npm run dev --workspace=web",
+    "dev:executor": "npm run dev --workspace=executor",
+    "contracts:fxrp-address": "npm run fxrp:address --workspace=contracts",
+    "contracts:fassets-overview": "npm run fassets:overview --workspace=contracts",
+    "ci": "npm run lint && npm run typecheck && npm run test && npm run build",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:e2e": "npm run test:e2e --workspace=web",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}
