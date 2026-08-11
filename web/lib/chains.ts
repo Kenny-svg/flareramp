@@ -1,4 +1,5 @@
 import { defineChain } from "viem";
+import { mainnet, base, bsc } from "viem/chains";
 
 // Interactive actions (mint/redeem/deposit/Smart Accounts) happen here.
 export const coston2 = defineChain({
@@ -29,3 +30,32 @@ export const flareMainnet = defineChain({
 });
 
 export const supportedChains = [coston2, flareMainnet] as const;
+
+/**
+ * Chains where the FXRP LayerZero OFT is deployed, for the cross-chain
+ * portfolio view (lib/oftDeployments.ts). `mainnet`/`base`/`bsc` are viem's
+ * own maintained chain definitions — safer than hand-rolling nativeCurrency
+ * fields. HyperEVM and Katana have no viem builtin, so they're hand-defined
+ * here from RPC endpoints that were live-verified (contract code present,
+ * `symbol() == "FXRP"`, `decimals() == 6`) against the addresses in
+ * oftDeployments.ts during implementation — see that file for the addresses.
+ */
+export { mainnet as ethereumMainnet, base, bsc as bnbSmartChain };
+
+export const hyperEvm = defineChain({
+  id: 999,
+  name: "HyperEVM",
+  nativeCurrency: { name: "HYPE", symbol: "HYPE", decimals: 18 },
+  rpcUrls: {
+    default: { http: ["https://rpc.hyperliquid.xyz/evm"] },
+  },
+});
+
+export const katana = defineChain({
+  id: 747474,
+  name: "Katana",
+  nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+  rpcUrls: {
+    default: { http: ["https://rpc.katana.network"] },
+  },
+});
