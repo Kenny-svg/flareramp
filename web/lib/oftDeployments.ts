@@ -44,3 +44,15 @@ export const FXRP_OFT_DEPLOYMENTS: OftDeployment[] = [
   { chainName: "Monad", chainId: null, fxrpOftAddress: null },
   { chainName: "HyperCore", chainId: null, fxrpOftAddress: null },
 ];
+
+/**
+ * Testnet OFT deployments — same verification bar as the mainnet list above
+ * (live `getBytecode` + `symbol()`/`decimals()` check, not copied from docs
+ * blind). The FXRP OFT docs describe only one live testnet route today:
+ * Coston2 <-> Hyperliquid Testnet. Coston2's own balance is read separately
+ * via the real FXRP ERC-20 (see the Flare-row note above; same lock/unlock
+ * caveat applies to its OFT Adapter on testnet).
+ */
+export const FXRP_OFT_TESTNET_DEPLOYMENTS: OftDeployment[] = [
+  { chainName: "Hyperliquid Testnet", chainId: 998, fxrpOftAddress: "0x14bfb521e318fc3d5e92A8462C65079BC7d4284c" },
+];

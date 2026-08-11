@@ -438,11 +438,8 @@ export function DirectMintSigning() {
   ] as const;
 
   return (
-    <section className="max-w-4xl mx-auto px-4 py-12">
+    <section className="max-w-4xl mx-auto px-4 pt-8 pb-12">
       <header className="mb-10 text-center md:text-left">
-        <p className="text-brand-500 font-extrabold text-sm tracking-wider uppercase mb-2">
-          XRPL Testnet → Coston2 FXRP
-        </p>
         <h1 className="text-4xl md:text-5xl font-black tracking-tight text-white mb-4 bg-clip-text text-transparent bg-gradient-to-r from-white via-zinc-100 to-zinc-400">
           Mint FXRP with Xaman
         </h1>

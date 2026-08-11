@@ -59,3 +59,18 @@ export const katana = defineChain({
     default: { http: ["https://rpc.katana.network"] },
   },
 });
+
+// Testnet route: the FXRP OFT docs describe only Coston2 <-> Hyperliquid
+// Testnet as a live testnet route today. Coston2 itself isn't listed here —
+// like Flare mainnet, its OFT Adapter only locks/unlocks (verified live: it
+// reverts on symbol()/decimals()), so its balance is read from the real
+// Coston2 FXRP ERC-20 via getFxrpTokenAddress(), not this chain list.
+export const hyperliquidTestnet = defineChain({
+  id: 998,
+  name: "Hyperliquid Testnet",
+  nativeCurrency: { name: "HYPE", symbol: "HYPE", decimals: 18 },
+  rpcUrls: {
+    default: { http: ["https://rpc.hyperliquid-testnet.xyz/evm"] },
+  },
+  testnet: true,
+});
