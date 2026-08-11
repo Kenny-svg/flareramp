@@ -17,7 +17,7 @@ export function PortfolioDashboard() {
           Live reads against Flare — no signing, no transactions. Cross-chain balances back the
           &quot;actually cross-chain&quot; portfolio story; agent collateral health is a supplementary trust
           signal for FXRP&apos;s overall backing, not a per-mint detail (FlareRamp&apos;s mint flow pays the
-          shared Core Vault, not any one agent).
+          shared Core Vault, not any one agent). See the Liquidity map tab for vault TVL.
         </p>
       </header>
       <CrossChainBalances />
