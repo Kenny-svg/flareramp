@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "network": "XRPL Testnet / Coston2",
+  "contracts": {
+    "assetManager": "0xc1Ca88b937d0b528842F95d5731ffB586f4fbDFA",
+    "fAsset": "0x0b6A3645c240605887a5532109323A3E12273dc7",
+    "coreVaultAddress": "rDhpmiPq4BVBDWMVdSrmkgt8thKyRzGV1p"
+  },
+  "xrpl": {
+    "transactionId": "0xae0e455c6f5a5da463dcd8af638d1903f56ae43beb1ad3bd7f4b9c409f142836",
+    "ledgerIndex": 19786678,
+    "sourceAddress": "raCLYHD5V22bo11FG229M4WpxTBg7x956A",
+    "amountDrops": "1000000",
+    "memoData": "0x46425052664100180000000016c3c6fdb329098c05bc75324976f22a826f63d3"
+  },
+  "fdc": {
+    "votingRound": "1421340",
+    "proofOwner": "0x3F3FFB6071aE872d7df12a6e3f94d8E082504af9",
+    "merkleProof": [
+      "0xdd3c566ff967c5143c985385d0f8c1a0ffd890d1825e3d45538680ba240ceca2",
+      "0x89742423bc37883c48f1670dfd4625e83bc6e4419f5aecb6d90696af03f3d661",
+      "0xde566b23d4b7163083d0bb8e02022195cf237120d13f27479cc8bed4dd462926"
+    ],
+    "response": {
+      "attestationType": "0x5852505061796d656e7400000000000000000000000000000000000000000000",
+      "sourceId": "0x7465737458525000000000000000000000000000000000000000000000000000",
+      "votingRound": "1421340",
+      "lowestUsedTimestamp": "1786348751",
+      "requestBody": {
+        "transactionId": "0xae0e455c6f5a5da463dcd8af638d1903f56ae43beb1ad3bd7f4b9c409f142836",
+        "proofOwner": "0x3F3FFB6071aE872d7df12a6e3f94d8E082504af9"
+      },
+      "responseBody": {
+        "blockNumber": "19786678",
+        "blockTimestamp": "1786348751",
+        "sourceAddress": "raCLYHD5V22bo11FG229M4WpxTBg7x956A",
+        "sourceAddressHash": "0x8fbb3147fd749956e83cb84937167ae8c23c35b41c8320b9098acddbe3527123",
+        "receivingAddressHash": "0xcf68c86c10983c93617102d84e2f94ea63edf51eaab2c158d8168d0a1f10fb38",
+        "intendedReceivingAddressHash": "0xcf68c86c10983c93617102d84e2f94ea63edf51eaab2c158d8168d0a1f10fb38",
+        "spentAmount": "1000012",
+        "intendedSpentAmount": "1000012",
+        "receivedAmount": "1000000",
+        "intendedReceivedAmount": "1000000",
+        "hasMemoData": true,
+        "firstMemoData": "0x46425052664100180000000016c3c6fdb329098c05bc75324976f22a826f63d3",
+        "hasDestinationTag": false,
+        "destinationTag": "0",
+        "status": 0
+      }
+    }
+  },
+  "settlement": {
+    "status": "executed",
+    "assetManager": "0xc1Ca88b937d0b528842F95d5731ffB586f4fbDFA",
+    "flareTransactionHash": "0xc907ce2db02a3ddd4c2c661fc0f8e712d45c2e66cdea1a0e52f4f667789cb327",
+    "blockNumber": "33852544",
+    "blockHash": "0x07a8013a7b64061fbb42175ab1d53c006702d7b63e616a33e3d555c2c2d07b8f",
+    "xrplTransactionId": "0xae0e455c6f5a5da463dcd8af638d1903f56ae43beb1ad3bd7f4b9c409f142836",
+    "recipient": "0x16c3C6fDb329098C05bc75324976f22a826F63D3",
+    "executor": "0x103b384064ae85577127097A7cCadfd6fb13f437",
+    "mintedAmountUBA": "800000",
+    "mintingFeeUBA": "100000",
+    "executorFeeUBA": "100000",
+    "gasUsed": "408915",
+    "effectiveGasPrice": "726000000000"
+  },
+  "fxrp": {
+    "recipient": "0x16c3C6fDb329098C05bc75324976f22a826F63D3",
+    "balanceBeforeUBA": "0",
+    "balanceAfterUBA": "800000",
+    "balanceDeltaUBA": "800000"
+  },
+  "completedAt": "2026-08-10T08:36:40.869Z"
+}
