@@ -49,6 +49,8 @@ export interface TransactionJob {
     transactionHash: Hex;
     assetManager: Address;
   };
+  /** ABI-encoded PackedUserOperation for 0xFE mint+deposit jobs. */
+  userOpData?: Hex;
   settlement?: DirectMintingSettlement;
   lastError?: StoredTransactionError;
 }

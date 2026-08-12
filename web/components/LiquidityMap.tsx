@@ -87,9 +87,7 @@ const PARTICLES = Array.from({ length: 12 }, (_, i) => ({
  * app/api/liquidity (lib/server/liquidityMap.ts). Coston2-only per current
  * scope; SparkDEX isn't included — no verified FXRP pool address for it yet.
  *
- * Firelight's TVL is exact (totalAssets()); Upshift's is a balance-of proxy
- * (no totalAssets()-equivalent on its ITokenizedVault interface) — flagged
- * per-node in the UI rather than presented as equally precise.
+ * Both registered Coston2 vaults expose ERC-4626 `totalAssets()` for TVL.
  */
 export function LiquidityMap() {
   const [overview, setOverview] = useState<LiquidityOverview | null>(null);

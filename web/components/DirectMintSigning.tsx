@@ -1,6 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { MintDestinationChooser } from "./MintDestinationChooser";
+import { VaultDetailsModal } from "./VaultDetailsModal";
+import {
+  destinationLabel,
+  isVaultDestination,
+  type MintDestinationKind,
+} from "@/lib/mintDestination";
+import type { LiquidityNode, LiquidityOverview } from "@/lib/liquidityTypes";
 
 type CheckStatus = "pass" | "warn" | "fail";
 type SigningStage =
@@ -14,8 +22,9 @@ type SigningStage =
 
 interface MintReview {
   checkedAt: string;
-  smartAccountRequired: false;
-  path: "Core Vault direct mint";
+  smartAccountRequired: boolean;
+  destination: MintDestinationKind;
+  path: string;
   transaction: {
     network: "XRPL Testnet";
     sourceAddress: string;
@@ -25,6 +34,8 @@ interface MintReview {
     recipient: string;
     executorAddress: string;
     memoData: string;
+    vaultAddress?: string;
+    personalAccount?: string;
   };
   fees: {
     mintingFeeDrops: string;
@@ -154,6 +165,13 @@ function messageFromResponse(value: unknown, fallback: string): string {
 }
 
 export function DirectMintSigning() {
+  const [destination, setDestination] = useState<MintDestinationKind>("wallet");
+  const [pendingVault, setPendingVault] = useState<
+    "firelight" | "upshift" | null
+  >(null);
+  const [vaultNode, setVaultNode] = useState<LiquidityNode | null>(null);
+  const [vaultLoading, setVaultLoading] = useState(false);
+  const [vaultError, setVaultError] = useState<string | null>(null);
   const [sourceAddress, setSourceAddress] = useState("");
   const [recipient, setRecipient] = useState("");
   const [amountXrp, setAmountXrp] = useState("1");
@@ -203,6 +221,13 @@ export function DirectMintSigning() {
       setSourceAddress(stored.review.transaction.sourceAddress);
       setRecipient(stored.review.transaction.recipient);
       setAmountXrp(stored.review.transaction.amountXrp);
+      if (
+        stored.review.destination === "wallet" ||
+        stored.review.destination === "firelight" ||
+        stored.review.destination === "upshift"
+      ) {
+        setDestination(stored.review.destination);
+      }
       if (stored.transactionId) {
         setTransactionId(stored.transactionId);
         setStatus({
@@ -222,8 +247,19 @@ export function DirectMintSigning() {
     }
   }, [readStatus]);
 
+  const terminalProgress =
+    progress?.stage === "minted" ||
+    progress?.stage === "failed" ||
+    progress?.stage === "recovery_required";
+
   useEffect(() => {
     if (!review || !signing) return;
+    // Persist only resumable sessions. Terminal outcomes clear storage so a
+    // refresh returns to a blank form instead of re-locking the UI.
+    if (terminalProgress) {
+      localStorage.removeItem(STORAGE_KEY);
+      return;
+    }
     if (
       status?.stage === "awaiting" ||
       status?.stage === "submitting" ||
@@ -239,7 +275,7 @@ export function DirectMintSigning() {
         } satisfies StoredSession),
       );
     }
-  }, [review, signing, status?.stage, transactionId]);
+  }, [review, signing, status?.stage, terminalProgress, transactionId]);
 
   useEffect(() => {
     if (
@@ -277,11 +313,8 @@ export function DirectMintSigning() {
 
   useEffect(() => {
     if (!transactionId || !review) return;
-    if (
-      progress?.stage === "minted" ||
-      progress?.stage === "failed" ||
-      progress?.stage === "recovery_required"
-    ) {
+    if (terminalProgress) {
+      localStorage.removeItem(STORAGE_KEY);
       return;
     }
     void readMintProgress(transactionId, review.transaction.recipient).catch(
@@ -297,7 +330,7 @@ export function DirectMintSigning() {
       );
     }, 5_000);
     return () => window.clearInterval(timer);
-  }, [progress?.stage, readMintProgress, review, transactionId]);
+  }, [readMintProgress, review, terminalProgress, transactionId]);
 
   async function prepareReview() {
     setBusy(true);
@@ -311,7 +344,12 @@ export function DirectMintSigning() {
       const response = await fetch("/api/mint/review", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sourceAddress, recipient, amountXrp }),
+        body: JSON.stringify({
+          sourceAddress,
+          recipient: isVaultDestination(destination) ? undefined : recipient,
+          amountXrp,
+          destination,
+        }),
       });
       const data = (await response.json()) as MintReview | { error: string };
       if (!response.ok) {
@@ -333,7 +371,12 @@ export function DirectMintSigning() {
       const response = await fetch("/api/mint/sign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sourceAddress, recipient, amountXrp }),
+        body: JSON.stringify({
+          sourceAddress,
+          recipient: isVaultDestination(destination) ? undefined : recipient,
+          amountXrp,
+          destination,
+        }),
       });
       const data = (await response.json()) as
         | { review: MintReview; signing: SigningRequest }
@@ -366,6 +409,41 @@ export function DirectMintSigning() {
     }
   }
 
+  async function selectDestination(kind: MintDestinationKind) {
+    if (kind === "wallet") {
+      setDestination("wallet");
+      setPendingVault(null);
+      setVaultNode(null);
+      setVaultError(null);
+      return;
+    }
+    setPendingVault(kind);
+    setVaultLoading(true);
+    setVaultError(null);
+    setVaultNode(null);
+    try {
+      const response = await fetch("/api/liquidity", { cache: "no-store" });
+      const data = (await response.json()) as
+        | LiquidityOverview
+        | { error: string };
+      if (!response.ok || !("nodes" in data)) {
+        throw new Error(
+          messageFromResponse(data, "Could not load vault details"),
+        );
+      }
+      const protocol = kind === "firelight" ? "Firelight" : "Upshift";
+      const node = data.nodes.find((entry) => entry.protocol === protocol);
+      if (!node) {
+        throw new Error(`${protocol} vault is not available on Coston2`);
+      }
+      setVaultNode(node);
+    } catch (cause) {
+      setVaultError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setVaultLoading(false);
+    }
+  }
+
   async function cancelSigning() {
     if (!signing) return;
     setBusy(true);
@@ -391,6 +469,11 @@ export function DirectMintSigning() {
   }
 
   function resetFlow() {
+    const activePayloadId =
+      signing &&
+      (status?.stage === "awaiting" || status?.stage === "submitting")
+        ? signing.payloadId
+        : null;
     setReview(null);
     setSigning(null);
     setStatus(null);
@@ -398,7 +481,14 @@ export function DirectMintSigning() {
     setProgress(null);
     setError(null);
     localStorage.removeItem(STORAGE_KEY);
+    if (activePayloadId) {
+      void fetch(`/api/mint/sign/${activePayloadId}`, { method: "DELETE" }).catch(
+        () => undefined,
+      );
+    }
   }
+
+  const sessionActive = Boolean(review || signing || transactionId);
 
   const hasFailure = review?.checks.some(
     (check) => check.status === "fail",
@@ -439,14 +529,37 @@ export function DirectMintSigning() {
 
   return (
     <section className="max-w-4xl mx-auto px-4 pt-8 pb-12">
+      <VaultDetailsModal
+        open={pendingVault !== null}
+        protocol={
+          pendingVault === "upshift"
+            ? "Upshift"
+            : pendingVault === "firelight"
+              ? "Firelight"
+              : "Firelight"
+        }
+        node={vaultNode}
+        loading={vaultLoading}
+        error={vaultError}
+        onCancel={() => {
+          setPendingVault(null);
+          setVaultNode(null);
+          setVaultError(null);
+        }}
+        onProceed={() => {
+          if (!pendingVault) return;
+          setDestination(pendingVault);
+          setPendingVault(null);
+        }}
+      />
       <header className="mb-10 text-center md:text-left">
         <h1 className="text-4xl md:text-5xl font-black tracking-tight text-white mb-4 bg-clip-text text-transparent bg-gradient-to-r from-white via-zinc-100 to-zinc-400">
           Mint FXRP with Xaman
         </h1>
         <p className="text-zinc-400 max-w-2xl leading-relaxed text-base md:text-lg">
           Review a live protocol quote, then approve one Core Vault payment in
-          your own Xaman wallet. FlareRamp never asks for or receives your seed
-          or private key.
+          your own Xaman wallet. Choose wallet delivery or mint-and-deposit into
+          Firelight / Upshift. FlareRamp never asks for your seed.
         </p>
       </header>
 
@@ -474,7 +587,38 @@ export function DirectMintSigning() {
         })}
       </nav>
 
+      {sessionActive && (
+        <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-950/50 px-4 py-3">
+          <p className="text-sm text-zinc-400">
+            {terminalProgress
+              ? progress?.stage === "minted"
+                ? "This mint finished. Start over whenever you want another payment."
+                : "This mint ended with an error. You can keep the details below or start over."
+              : transactionId
+                ? "Resuming an in-progress mint. You can abandon it and start over anytime."
+                : "A signing session is open. Cancel it here if you want to change the payment."}
+          </p>
+          <button
+            type="button"
+            onClick={resetFlow}
+            className="shrink-0 self-start sm:self-auto border border-zinc-700 hover:border-zinc-500 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 font-semibold px-4 py-2 rounded-xl text-xs uppercase tracking-wider transition-all"
+          >
+            Start over
+          </button>
+        </div>
+      )}
+
       <div className="bg-zinc-900/30 border border-zinc-800/80 backdrop-blur-md p-6 rounded-2xl shadow-xl">
+        <MintDestinationChooser
+          value={destination}
+          disabled={flowLocked}
+          onSelect={(kind) => {
+            if (!flowLocked) void selectDestination(kind);
+          }}
+        />
+        <p className="mb-4 text-xs text-zinc-500">
+          Selected: {destinationLabel(destination)}
+        </p>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-end">
           <div className="md:col-span-3 grid grid-cols-1 sm:grid-cols-3 gap-4">
             <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-400">
@@ -487,16 +631,25 @@ export function DirectMintSigning() {
                 className="mt-2 block w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500 placeholder-zinc-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-mono text-sm"
               />
             </label>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-400">
-              FXRP recipient on Coston2
-              <input
-                value={recipient}
-                onChange={(event) => setRecipient(event.target.value)}
-                placeholder="0x..."
-                disabled={flowLocked}
-                className="mt-2 block w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500 placeholder-zinc-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-mono text-sm"
-              />
-            </label>
+            {!isVaultDestination(destination) ? (
+              <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                FXRP recipient on Coston2
+                <input
+                  value={recipient}
+                  onChange={(event) => setRecipient(event.target.value)}
+                  placeholder="0x..."
+                  disabled={flowLocked}
+                  className="mt-2 block w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500 placeholder-zinc-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-mono text-sm"
+                />
+              </label>
+            ) : (
+              <div className="block text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                Smart Account recipient
+                <p className="mt-2 text-sm font-mono text-zinc-300 bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3">
+                  Derived from XRPL source
+                </p>
+              </div>
+            )}
             <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-400">
               TestXRP payment amount
               <input
@@ -548,7 +701,11 @@ export function DirectMintSigning() {
                 Approve Payment Details
               </h2>
               <p className="text-zinc-400 text-sm mb-6 bg-zinc-950/40 p-3 rounded-lg border border-zinc-900">
-                <span className="font-semibold text-brand-400">Path:</span> {review.path}. A Smart Account is not required for this mint.
+                <span className="font-semibold text-brand-400">Path:</span>{" "}
+                {review.path}.{" "}
+                {review.smartAccountRequired
+                  ? "A Smart Account personal account receives FXRP and deposits to the vault in one atomic Flare transaction."
+                  : "A Smart Account is not required for this mint."}
               </p>
               <dl className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                 <div className="bg-zinc-950/30 p-3 rounded-xl border border-zinc-900">
@@ -580,7 +737,11 @@ export function DirectMintSigning() {
                   <dd className="text-zinc-200 overflow-wrap-anywhere break-all font-mono text-xs">{review.transaction.executorAddress}</dd>
                 </div>
                 <div className="bg-zinc-950/30 p-3 rounded-xl border border-zinc-900 md:col-span-2">
-                  <dt className="text-zinc-500 font-medium text-xs uppercase tracking-wider mb-1">48-byte Encoded Memo</dt>
+                  <dt className="text-zinc-500 font-medium text-xs uppercase tracking-wider mb-1">
+                    {review.smartAccountRequired
+                      ? "Smart Accounts memo (0xFE)"
+                      : "48-byte Encoded Memo"}
+                  </dt>
                   <dd className="text-brand-300 overflow-wrap-anywhere break-all font-mono text-xs font-semibold">{review.transaction.memoData}</dd>
                 </div>
               </dl>
@@ -836,15 +997,29 @@ export function DirectMintSigning() {
           </div>
 
           {progress?.error && (
-            <div role="alert" className="mt-4 flex items-center gap-3 bg-red-950/20 border border-red-900/50 text-red-400 px-4 py-3 rounded-xl text-sm font-medium">
-              <svg className="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div role="alert" className="mt-4 flex items-start gap-3 bg-red-950/20 border border-red-900/50 text-red-400 px-4 py-3 rounded-xl text-sm font-medium">
+              <svg className="h-5 w-5 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
-              <span>
-                {progress.error.code}: {progress.error.message}
+              <span className="min-w-0 break-words line-clamp-4">
+                {progress.error.code}:{" "}
+                {progress.error.message.length > 280
+                  ? `${progress.error.message.slice(0, 279)}…`
+                  : progress.error.message}
                 {progress.error.retryable ? " The executor will retry automatically." : ""}
               </span>
             </div>
+          )}
+
+          {(progress?.stage === "failed" ||
+            progress?.stage === "recovery_required") && (
+            <button
+              type="button"
+              onClick={resetFlow}
+              className="mt-4 bg-zinc-100 hover:bg-white text-zinc-950 font-bold px-6 py-2.5 rounded-xl transition-all text-xs uppercase tracking-wider"
+            >
+              Start a new mint
+            </button>
           )}
 
           {progress?.stage === "minted" && progress.settlement && (

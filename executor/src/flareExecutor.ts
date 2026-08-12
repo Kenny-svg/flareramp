@@ -25,6 +25,8 @@ export interface DirectMintingParams {
   expectedPayment: ExpectedXrpPayment;
   executorPrivateKey: Hex;
   coston2RpcUrl?: string;
+  /** ABI-encoded PackedUserOperation for 0xFE custom instructions. */
+  userOpData?: Hex;
   onSubmitted?: (
     transactionHash: Hex,
     assetManager: Address,
@@ -50,6 +52,7 @@ export interface DirectMintingSettlement {
   executorFeeUBA: bigint;
   gasUsed: bigint;
   effectiveGasPrice: bigint;
+  vaultDeposit?: boolean;
 }
 
 export type DirectMintingErrorCode =
@@ -61,7 +64,8 @@ export type DirectMintingErrorCode =
   | "EXECUTION_REVERTED"
   | "MINTING_DELAYED"
   | "PAYMENT_TOO_SMALL"
-  | "UNEXPECTED_OUTCOME";
+  | "UNEXPECTED_OUTCOME"
+  | "MISSING_USER_OP";
 
 export class DirectMintingError extends Error {
   constructor(
@@ -81,18 +85,46 @@ export interface DirectMintingDependencies {
   simulate: (
     assetManager: Address,
     proof: XrpPaymentProof,
+    userOpData?: Hex,
   ) => Promise<void>;
   submit: (
     assetManager: Address,
     proof: XrpPaymentProof,
+    userOpData?: Hex,
   ) => Promise<Hex>;
   waitForReceipt: (transactionHash: Hex) => Promise<TransactionReceipt>;
 }
 
+/** Cap public/UI-facing executor errors so viem dumps cannot blow up the status panel. */
+export const MAX_PUBLIC_ERROR_MESSAGE_LENGTH = 280;
+
+const KNOWN_REVERT_SELECTORS: Record<string, string> = {
+  "0xa5fa8d2b": "CallFailed (Smart Account vault call reverted)",
+};
+
+export function truncatePublicErrorMessage(
+  message: string,
+  maxLength = MAX_PUBLIC_ERROR_MESSAGE_LENGTH,
+): string {
+  const cleaned = message.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= maxLength) return cleaned;
+  return `${cleaned.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
+function summarizeRevertSignature(text: string): string | undefined {
+  const match = text.match(/0x[a-fA-F0-9]{8}/);
+  if (!match) return undefined;
+  const selector = match[0].toLowerCase();
+  return KNOWN_REVERT_SELECTORS[selector];
+}
+
 function errorDescription(error: unknown): string {
   const visited = new Set<unknown>();
-  const parts: string[] = [];
   let current: unknown = error;
+  let errorName: string | undefined;
+  let shortMessage: string | undefined;
+  let message: string | undefined;
+
   while (
     typeof current === "object" &&
     current !== null &&
@@ -100,12 +132,26 @@ function errorDescription(error: unknown): string {
   ) {
     visited.add(current);
     const value = current as Record<string, unknown>;
-    for (const key of ["errorName", "shortMessage", "message"]) {
-      if (typeof value[key] === "string") parts.push(value[key]);
+    if (!errorName && typeof value.errorName === "string") {
+      errorName = value.errorName;
+    }
+    if (!shortMessage && typeof value.shortMessage === "string") {
+      shortMessage = value.shortMessage;
+    }
+    if (!message && typeof value.message === "string") {
+      message = value.message;
     }
     current = value.cause;
   }
-  return parts.join(" ");
+
+  const raw = shortMessage || errorName || message || "unknown error";
+  const known = summarizeRevertSignature(raw) ?? summarizeRevertSignature(message ?? "");
+  if (known) {
+    return truncatePublicErrorMessage(known);
+  }
+  // Drop viem "Contract Call:" / hex dumps; keep the first sentence-ish chunk.
+  const withoutDump = raw.split(/Contract Call:|Raw Call Arguments:|Request body:/i)[0];
+  return truncatePublicErrorMessage(withoutDump);
 }
 
 function isAlreadyExecutedError(error: unknown): boolean {
@@ -132,7 +178,17 @@ export function createDirectMintingDependencies(
         functionName: "directMintingPaymentAddress",
       }),
 
-    async simulate(assetManager, proof) {
+    async simulate(assetManager, proof, userOpData) {
+      if (userOpData && userOpData !== "0x") {
+        await publicClient.simulateContract({
+          account,
+          address: assetManager,
+          abi: iAssetManagerAbi,
+          functionName: "executeDirectMintingWithData",
+          args: [proof, userOpData],
+        });
+        return;
+      }
       await publicClient.simulateContract({
         account,
         address: assetManager,
@@ -142,14 +198,24 @@ export function createDirectMintingDependencies(
       });
     },
 
-    submit: (assetManager, proof) =>
-      walletClient.writeContract({
+    submit: (assetManager, proof, userOpData) => {
+      if (userOpData && userOpData !== "0x") {
+        return walletClient.writeContract({
+          account,
+          address: assetManager,
+          abi: iAssetManagerAbi,
+          functionName: "executeDirectMintingWithData",
+          args: [proof, userOpData],
+        });
+      }
+      return walletClient.writeContract({
         account,
         address: assetManager,
         abi: iAssetManagerAbi,
         functionName: "executeDirectMinting",
         args: [proof],
-      }),
+      });
+    },
 
     waitForReceipt: (transactionHash) =>
       publicClient.waitForTransactionReceipt({ hash: transactionHash }),
@@ -225,6 +291,50 @@ export function decodeDirectMintingSettlement(
       };
     }
 
+    if (event.eventName === "DirectMintingExecutedToSmartAccount") {
+      const {
+        transactionId,
+        executor,
+        mintedAmountUBA,
+        mintingFeeUBA,
+      } = event.args;
+      if (
+        typeof transactionId !== "string" ||
+        typeof executor !== "string" ||
+        typeof mintedAmountUBA !== "bigint" ||
+        typeof mintingFeeUBA !== "bigint"
+      ) {
+        throw new DirectMintingError(
+          "UNEXPECTED_OUTCOME",
+          "DirectMintingExecutedToSmartAccount is missing required fields",
+        );
+      }
+      if (
+        transactionId.toLowerCase() !== expectedTransactionId.toLowerCase()
+      ) {
+        throw new DirectMintingError(
+          "UNEXPECTED_OUTCOME",
+          "Smart Account mint event contains a different XRPL transaction id",
+        );
+      }
+      return {
+        status: "executed",
+        assetManager,
+        flareTransactionHash: transactionHash,
+        blockNumber: receipt.blockNumber,
+        blockHash: receipt.blockHash,
+        xrplTransactionId: transactionId as Hex,
+        recipient: getAddress(executor),
+        executor: getAddress(executor),
+        mintedAmountUBA,
+        mintingFeeUBA,
+        executorFeeUBA: 0n,
+        gasUsed: receipt.gasUsed,
+        effectiveGasPrice: receipt.effectiveGasPrice,
+        vaultDeposit: true,
+      };
+    }
+
     if (
       event.eventName === "DirectMintingDelayed" ||
       event.eventName === "LargeDirectMintingDelayed"
@@ -251,13 +361,6 @@ export function decodeDirectMintingSettlement(
           receivedAmountUBA: event.args.receivedAmountUBA,
           minimumMintingFeeUBA: event.args.minimumMintingFeeUBA,
         },
-      );
-    }
-
-    if (event.eventName === "DirectMintingExecutedToSmartAccount") {
-      throw new DirectMintingError(
-        "UNEXPECTED_OUTCOME",
-        "Payment resolved to a Smart Account flow, which this executor does not support",
       );
     }
   }
@@ -311,7 +414,11 @@ export async function executeDirectMinting(
   }
 
   try {
-    await dependencies.simulate(assetManager, params.proof);
+    await dependencies.simulate(
+      assetManager,
+      params.proof,
+      params.userOpData,
+    );
   } catch (error) {
     if (isAlreadyExecutedError(error)) {
       throw new DirectMintingError(
@@ -320,20 +427,29 @@ export async function executeDirectMinting(
         error,
       );
     }
+    const detail = errorDescription(error);
     throw new DirectMintingError(
       "SIMULATION_FAILED",
-      "executeDirectMinting simulation failed; no transaction was signed",
+      params.userOpData
+        ? `executeDirectMintingWithData simulation failed; no transaction was signed${detail ? `: ${detail}` : ""}`
+        : `executeDirectMinting simulation failed; no transaction was signed${detail ? `: ${detail}` : ""}`,
       error,
     );
   }
 
   let transactionHash: Hex;
   try {
-    transactionHash = await dependencies.submit(assetManager, params.proof);
+    transactionHash = await dependencies.submit(
+      assetManager,
+      params.proof,
+      params.userOpData,
+    );
   } catch (error) {
     throw new DirectMintingError(
       "SUBMISSION_FAILED",
-      "Failed to submit executeDirectMinting",
+      params.userOpData
+        ? "Failed to submit executeDirectMintingWithData"
+        : "Failed to submit executeDirectMinting",
       error,
     );
   }

@@ -1,4 +1,6 @@
 import * as dotenv from "dotenv";
+import { dirname, join } from "node:path";
+import { keccak256, type Hex } from "viem";
 import { runReconnectingXrplWatcher } from "./xrplWatcher";
 import {
   createFdcProofDependencies,
@@ -15,6 +17,7 @@ import { JsonFileTransactionStore } from "./transactionStore";
 import { TransactionProcessor } from "./transactionProcessor";
 import { createLogger } from "./logger";
 import { startHealthServer } from "./healthServer";
+import { JsonFileUserOpStore } from "./userOpStore";
 
 dotenv.config();
 
@@ -37,8 +40,12 @@ async function main() {
     config.coston2RpcUrl,
   );
   const store = new JsonFileTransactionStore(config.transactionStorePath);
+  const userOpStore = new JsonFileUserOpStore(
+    join(dirname(config.transactionStorePath), "executor-userops.json"),
+  );
   const health = { storeReady: false, watcherConnected: false };
   await store.initialize();
+  await userOpStore.initialize();
   health.storeReady = true;
 
   const processor = new TransactionProcessor(
@@ -52,13 +59,14 @@ async function main() {
           lifecycle,
           resume,
         ),
-      executeMinting: (proof, expectedPayment, onSubmitted) =>
+      executeMinting: (proof, expectedPayment, onSubmitted, userOpData) =>
         executeDirectMinting(
           {
             proof,
             expectedPayment,
             executorPrivateKey: config.executorPrivateKey,
             coston2RpcUrl: config.coston2RpcUrl,
+            userOpData,
             onSubmitted,
           },
           directMintingDependencies,
@@ -71,6 +79,18 @@ async function main() {
           config.coston2RpcUrl,
           directMintingDependencies,
         ),
+      resolveUserOp: async (instruction) => {
+        const memo = instruction.memoHex.toLowerCase();
+        if (!memo.startsWith("0xfe") || memo.length !== 86) {
+          return undefined;
+        }
+        const byHash = await userOpStore.get(keccak256(memo as Hex));
+        if (byHash) return byHash.userOpData;
+        const bySource = await userOpStore.getBySource(
+          instruction.sourceXrplAddress,
+        );
+        return bySource?.userOpData;
+      },
       now: () => Date.now(),
     },
     logger,
@@ -101,6 +121,7 @@ async function main() {
         ).length,
       };
     },
+    (entry) => userOpStore.put(entry),
   );
   const abortController = new AbortController();
   const retryTimer = setInterval(

@@ -1,21 +1,23 @@
 # FlareRamp
 
-FlareRamp is a testnet-first, non-custodial XRP → FXRP ramp for Flare Summer
-Signal. It guides one verified Core Vault payment through:
+FlareRamp is a testnet-first, non-custodial XRP ↔ FXRP ramp for Flare Summer
+Signal. It guides verified Core Vault minting and Coston2 redemptions:
 
-**Check → Sign in Xaman → Prove with FDC → Mint FXRP**
+**Check → Choose destination → Sign in Xaman → Prove with FDC → Mint FXRP**
 
-The shipped hackathon UI does not provide agent selection, Coston2 liquidity,
-yield routing, public executor discovery, or universal zero-FLR Smart Accounts
-actions.
+Optional destinations after mint: Coston2 wallet, Firelight vault, or Upshift
+vault (Smart Accounts `0xFE` mint-and-deposit). Reverse path: MetaMask
+`redeemAmount` / `redeemWithTag` on Coston2.
 
 ## What is implemented
 
 - Protocol-derived Core Vault destination, fees, FTSO XRP/USD quote and memo.
+- Destination chooser with Firelight/Upshift vault details modal.
 - User-controlled Xaman signing; no XRPL seed or private key enters FlareRamp.
 - Durable operator executor with XRPL watching, FDC `XRPPayment` proofs,
-  idempotent recovery and `executeDirectMinting`.
+  idempotent recovery, `executeDirectMinting` and `executeDirectMintingWithData`.
 - Live stage progress, final FXRP balance and shareable public Proof Receipts.
+- MetaMask FXRP → XRPL redeem quote + submit flow.
 - Explicitly labeled recorded replay for outages; it never submits transactions.
 
 ## Repository

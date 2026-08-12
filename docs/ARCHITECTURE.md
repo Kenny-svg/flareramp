@@ -2,18 +2,28 @@
 
 ```text
 Browser
-  │  review/sign/status/receipt
+  │  review/sign/status/receipt + redeem quote
   ▼
 Next.js web server ───── Xaman API
   │                      XRPL Testnet
-  │ operator status      Coston2 RPC / FTSO
+  │ operator status      Coston2 RPC / FTSO / vaults
   ▼
 Operator executor
   ├─ XRPL Core Vault watcher
-  ├─ durable JSON transaction store
+  ├─ durable JSON transaction store + userOp registry
   ├─ FDC verifier → FdcHub → Relay → DA Layer
-  └─ AssetManager.executeDirectMinting
+  └─ AssetManager.executeDirectMinting[/WithData]
 ```
+
+Mint destinations:
+
+- **Wallet** — 48-byte Core Vault memo → `executeDirectMinting`
+- **Firelight / Upshift** — 42-byte `0xFE` memo + off-chain PackedUserOperation →
+  `executeDirectMintingWithData` (atomic mint + vault deposit)
+
+Reverse bridge uses the browser wallet directly:
+
+- MetaMask on Coston2 → `redeemAmount` / `redeemWithTag` (user pays C2FLR gas)
 
 The browser only receives public transaction details and Xaman links. Xaman
 credentials, verifier keys and the executor's Coston2 key remain server-side.

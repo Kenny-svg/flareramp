@@ -1,5 +1,8 @@
 import { createServer, type Server } from "node:http";
+import type { Hex } from "viem";
+import { truncatePublicErrorMessage } from "./flareExecutor";
 import type { TransactionJob } from "./transactionStore";
+import type { StoredUserOp } from "./userOpStore";
 
 export interface ExecutorHealth {
   storeReady: boolean;
@@ -39,6 +42,7 @@ export interface PublicTransactionStatus {
     mintedAmountUBA: string;
     mintingFeeUBA: string;
     executorFeeUBA: string;
+    vaultDeposit?: boolean;
   };
   error?: {
     code: string;
@@ -90,12 +94,13 @@ export function toPublicTransactionStatus(
           mintedAmountUBA: job.settlement.mintedAmountUBA.toString(),
           mintingFeeUBA: job.settlement.mintingFeeUBA.toString(),
           executorFeeUBA: job.settlement.executorFeeUBA.toString(),
+          vaultDeposit: job.settlement.vaultDeposit,
         }
       : undefined,
     error: job.lastError
       ? {
           code: job.lastError.code,
-          message: job.lastError.message,
+          message: truncatePublicErrorMessage(job.lastError.message),
           retryable: job.lastError.retryable,
           occurredAt: new Date(job.lastError.occurredAt).toISOString(),
         }
@@ -122,13 +127,66 @@ function transactionRequestAllowed(address: string, now = Date.now()): {
   };
 }
 
+async function readJsonBody(request: import("node:http").IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  if (chunks.length === 0) return null;
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
 export async function startHealthServer(
   port: number,
   getHealth: () => ExecutorHealth,
   getTransaction?: (transactionId: string) => Promise<TransactionJob | null>,
   getMetrics?: () => Promise<Record<string, number>>,
+  registerUserOp?: (entry: StoredUserOp) => Promise<void>,
 ): Promise<Server> {
   const server = createServer(async (request, response) => {
+    if (request.method === "POST" && request.url === "/userops" && registerUserOp) {
+      try {
+        const body = (await readJsonBody(request)) as {
+          memoHash?: string;
+          userOpData?: string;
+          sourceAddress?: string;
+        } | null;
+        if (
+          !body?.memoHash ||
+          !body.userOpData ||
+          !body.sourceAddress ||
+          !/^0x[0-9a-fA-F]{64}$/.test(body.memoHash) ||
+          !/^0x[0-9a-fA-F]+$/.test(body.userOpData)
+        ) {
+          response
+            .writeHead(400, { "Content-Type": "application/json" })
+            .end(JSON.stringify({ error: "Invalid userOp registration body" }));
+          return;
+        }
+        await registerUserOp({
+          memoHash: body.memoHash.toLowerCase() as Hex,
+          userOpData: body.userOpData as Hex,
+          sourceAddress: body.sourceAddress,
+          createdAt: Date.now(),
+        });
+        response
+          .writeHead(200, { "Content-Type": "application/json" })
+          .end(JSON.stringify({ status: "registered" }));
+      } catch (error) {
+        response
+          .writeHead(500, { "Content-Type": "application/json" })
+          .end(
+            JSON.stringify({
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "userOp registration failed",
+            }),
+          );
+      }
+      return;
+    }
+
     if (request.method !== "GET") {
       response.writeHead(405).end();
       return;

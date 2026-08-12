@@ -4,20 +4,19 @@ import { useState } from "react";
 import { DirectMintSigning } from "./DirectMintSigning";
 import { PortfolioDashboard } from "./PortfolioDashboard";
 import { LiquidityDashboard } from "./LiquidityDashboard";
+import { ReverseRedeem } from "./ReverseRedeem";
 
-type TabId = "mint" | "portfolio" | "liquidity";
+type TabId = "mint" | "redeem" | "portfolio" | "liquidity";
 
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: "mint", label: "XRPL Testnet → Coston2 FXRP" },
+  { id: "redeem", label: "Coston2 FXRP → XRPL" },
   { id: "portfolio", label: "Portfolio & agent risk" },
   { id: "liquidity", label: "Liquidity map" },
 ];
 
 /**
- * Replaces the mint flow's static eyebrow label with a tab switcher at the
- * same level, so "Portfolio & agent risk" sits alongside "XRPL Testnet →
- * Coston2 FXRP" instead of as a separate corner link. DirectMintSigning no
- * longer renders its own eyebrow line — this is now the single source of it.
+ * Tab switcher for mint, redeem, portfolio, and liquidity surfaces.
  */
 export function HomeTabs() {
   const [tab, setTab] = useState<TabId>("mint");
@@ -50,6 +49,7 @@ export function HomeTabs() {
       </div>
 
       {tab === "mint" && <DirectMintSigning />}
+      {tab === "redeem" && <ReverseRedeem />}
       {tab === "portfolio" && <PortfolioDashboard />}
       {tab === "liquidity" && <LiquidityDashboard />}
     </div>

@@ -271,7 +271,11 @@ export function diagnoseReceipt(
           : "Direct mint requires manual recovery",
       evidence: [
         job.error
-          ? `${job.error.code}: ${job.error.message}`
+          ? `${job.error.code}: ${
+              job.error.message.length > 280
+                ? `${job.error.message.slice(0, 279)}…`
+                : job.error.message
+            }`
           : "No structured executor error was checkpointed.",
       ],
       guidance: [
