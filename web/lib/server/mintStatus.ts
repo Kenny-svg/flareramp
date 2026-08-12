@@ -62,6 +62,8 @@ export interface PublicExecutorJob {
     mintedAmountUBA: string;
     mintingFeeUBA: string;
     executorFeeUBA: string;
+    /** True when the mint was routed into a vault via a `0xFE` user operation. */
+    vaultDeposit?: boolean;
   };
   error?: {
     code: string;
@@ -199,6 +201,50 @@ export async function getPublicExecutorJob(
     };
   } catch {
     return { job: null, reachable: false };
+  }
+}
+
+export interface PublicSettlementIndex {
+  settlements: PublicExecutorJob[];
+  checkedAt: string;
+  reachable: boolean;
+}
+
+/**
+ * Settled mints for the public Proof Receipt index (`/receipt`).
+ *
+ * Deliberately fails soft: if the executor is offline the page still renders
+ * with `reachable: false` and an honest banner, rather than erroring. The
+ * executor only returns `minted` jobs here, so nothing in flight is exposed.
+ */
+export async function listPublicSettlements(): Promise<PublicSettlementIndex> {
+  const executorUrl = getWebServerConfig().executorStatusUrl.replace(
+    /\/+$/,
+    "",
+  );
+  try {
+    const response = await fetch(`${executorUrl}/settlements`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) {
+      throw new Error(`Executor settlements returned HTTP ${response.status}`);
+    }
+    const body = (await response.json()) as {
+      settlements?: PublicExecutorJob[];
+      checkedAt?: string;
+    };
+    return {
+      settlements: body.settlements ?? [],
+      checkedAt: body.checkedAt ?? new Date().toISOString(),
+      reachable: true,
+    };
+  } catch {
+    return {
+      settlements: [],
+      checkedAt: new Date().toISOString(),
+      reachable: false,
+    };
   }
 }
 

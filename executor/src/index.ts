@@ -122,6 +122,7 @@ async function main() {
       };
     },
     (entry) => userOpStore.put(entry),
+    () => store.list(),
   );
   const abortController = new AbortController();
   const retryTimer = setInterval(

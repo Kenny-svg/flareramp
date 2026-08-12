@@ -20,12 +20,18 @@ function shortenAddress(address: string): string {
 }
 
 /**
- * Agent Collateral / Risk Monitor — reads live collateral state for every
- * FXRP agent via IAssetManager.getAvailableAgentsDetailedList +
- * getAgentInfo, and flags agents whose current collateral ratio is close to
- * or below their own minting-eligibility floor. Backed by
- * app/api/agents/risk, which uses the typed IAssetManager ABI from
- * @flarenetwork/flare-wagmi-periphery-package (see lib/server/agentRisk.ts).
+ * Redemption agent health — reads live collateral state for every FXRP agent
+ * via IAssetManager.getAvailableAgentsDetailedList + getAgentInfo, and flags
+ * agents whose current collateral ratio is close to or below their own
+ * minting-eligibility floor. Backed by app/api/agents/risk, which uses the
+ * typed IAssetManager ABI from @flarenetwork/flare-wagmi-periphery-package
+ * (see lib/server/agentRisk.ts).
+ *
+ * Sited in the redeem flow, not the portfolio: under direct minting the mint
+ * path pays the shared Core Vault and never selects an agent, so agent health
+ * is not a per-mint concern. Redemptions are still assigned to agents FIFO,
+ * so this is the surface where an agent in liquidation actually bears on what
+ * the user is about to do.
  */
 export function AgentRiskMonitor() {
   const [network, setNetwork] = useState<FassetsNetwork>("coston2");
@@ -57,9 +63,13 @@ export function AgentRiskMonitor() {
     <section className="bg-zinc-900/30 border border-zinc-800/80 backdrop-blur-md p-6 rounded-2xl shadow-xl">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div>
-          <h2 className="text-xl font-black tracking-tight text-white">Agent Collateral / Risk Monitor</h2>
+          <h2 className="text-xl font-black tracking-tight text-white">
+            Will your redemption settle?
+          </h2>
           <p className="text-zinc-400 text-sm mt-1">
-            Live collateral ratios for every FXRP agent vs. each agent&apos;s own minting-eligibility floor.
+            Redemptions are assigned to agents FIFO — you cannot pick one. Live collateral ratios
+            for every FXRP agent vs. its own minting-eligibility floor, so you can see whether the
+            queue is healthy before redeeming.
           </p>
         </div>
         <div className="flex items-center gap-2">

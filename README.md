@@ -12,12 +12,17 @@ vault (Smart Accounts `0xFE` mint-and-deposit). Reverse path: MetaMask
 ## What is implemented
 
 - Protocol-derived Core Vault destination, fees, FTSO XRP/USD quote and memo.
-- Destination chooser with Firelight/Upshift vault details modal.
+- Destination chooser with live vault TVL and a Firelight/Upshift details modal.
 - User-controlled Xaman signing; no XRPL seed or private key enters FlareRamp.
 - Durable operator executor with XRPL watching, FDC `XRPPayment` proofs,
   idempotent recovery, `executeDirectMinting` and `executeDirectMintingWithData`.
-- Live stage progress, final FXRP balance and shareable public Proof Receipts.
-- MetaMask FXRP → XRPL redeem quote + submit flow.
+- Live stage progress, final FXRP balance and shareable public Proof Receipts,
+  plus a no-wallet `/receipt` index of every settled mint.
+- MetaMask FXRP → XRPL redeem: `redeemAmount` for any amount (no whole-lot
+  rounding) and `redeemWithTag` for exchange and custodial destinations that
+  require an XRPL destination tag, gated on `redeemWithTagSupported()`.
+- Redemption agent collateral health, shown where the FIFO agent queue
+  actually affects the user's next action.
 - Explicitly labeled recorded replay for outages; it never submits transactions.
 
 ## Repository

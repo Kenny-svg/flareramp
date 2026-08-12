@@ -1,4 +1,3 @@
-import { AgentRiskMonitor } from "./AgentRiskMonitor";
 import { CrossChainBalances } from "./CrossChainBalances";
 
 /**
@@ -11,17 +10,16 @@ export function PortfolioDashboard() {
     <div className="max-w-4xl mx-auto px-4 py-12 flex flex-col gap-8">
       <header>
         <h1 className="text-4xl md:text-5xl font-black tracking-tight text-white mb-4">
-          Agents &amp; cross-chain FXRP
+          Cross-chain FXRP
         </h1>
         <p className="text-zinc-400 max-w-2xl leading-relaxed text-base md:text-lg">
-          Live reads against Flare — no signing, no transactions. Cross-chain balances back the
-          &quot;actually cross-chain&quot; portfolio story; agent collateral health is a supplementary trust
-          signal for FXRP&apos;s overall backing, not a per-mint detail (FlareRamp&apos;s mint flow pays the
-          shared Core Vault, not any one agent). See the Liquidity map tab for vault TVL.
+          FXRP is a LayerZero OFT: one supply, many chains. This reads a single address&apos;s balance
+          on the FAssets chain and on every chain where the OFT is deployed — live, no signing, no
+          transactions. Agent collateral health now sits in the Redeem tab, where the agent queue
+          actually affects what you are about to do.
         </p>
       </header>
       <CrossChainBalances />
-      <AgentRiskMonitor />
     </div>
   );
 }

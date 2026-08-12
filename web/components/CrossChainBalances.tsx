@@ -98,16 +98,12 @@ export function CrossChainBalances() {
               </tr>
             </thead>
             <tbody>
-              {result.rows.map((row) => (
+              {result.rows
+                .filter((row) => row.status === "loaded" && row.balance !== null && Number(row.balance) >= 0)
+                .map((row) => (
                 <tr key={row.chainName} className="border-b border-zinc-900">
                   <td className="py-3 pr-4 text-zinc-300">{row.chainName}</td>
-                  <td className="py-3 pr-4 text-zinc-400">
-                    {row.status === "loaded" && row.balance}
-                    {row.status === "not-configured" && (
-                      <span className="text-zinc-600">not configured — see lib/oftDeployments.ts</span>
-                    )}
-                    {row.status === "error" && <span className="text-red-400">error</span>}
-                  </td>
+                  <td className="py-3 pr-4 text-zinc-400">{row.balance}</td>
                 </tr>
               ))}
               <tr>

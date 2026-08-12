@@ -4,15 +4,15 @@ import { useState } from "react";
 import { DirectMintSigning } from "./DirectMintSigning";
 import { PortfolioDashboard } from "./PortfolioDashboard";
 import { LiquidityDashboard } from "./LiquidityDashboard";
-import { ReverseRedeem } from "./ReverseRedeem";
+import { RedeemDashboard } from "./RedeemDashboard";
 
 type TabId = "mint" | "redeem" | "portfolio" | "liquidity";
 
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: "mint", label: "XRPL Testnet → Coston2 FXRP" },
   { id: "redeem", label: "Coston2 FXRP → XRPL" },
-  { id: "portfolio", label: "Portfolio & agent risk" },
-  { id: "liquidity", label: "Liquidity map" },
+  { id: "portfolio", label: "Cross-chain FXRP" },
+  { id: "liquidity", label: "Vaults" },
 ];
 
 /**
@@ -49,7 +49,7 @@ export function HomeTabs() {
       </div>
 
       {tab === "mint" && <DirectMintSigning />}
-      {tab === "redeem" && <ReverseRedeem />}
+      {tab === "redeem" && <RedeemDashboard />}
       {tab === "portfolio" && <PortfolioDashboard />}
       {tab === "liquidity" && <LiquidityDashboard />}
     </div>

@@ -136,12 +136,35 @@ async function readJsonBody(request: import("node:http").IncomingMessage): Promi
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
+/** Hard cap on the public settlement index, independent of caller input. */
+export const SETTLEMENT_INDEX_LIMIT = 20;
+
+/**
+ * Settled mints, newest first, for the public Proof Receipt index.
+ *
+ * Only `minted` jobs are exposed: a settled mint has already written both an
+ * XRPL payment and a Coston2 settlement to public ledgers, so this endpoint
+ * aggregates public data rather than disclosing anything new. In-flight and
+ * failed jobs stay reachable only via `/transactions/:id`, which needs the
+ * unguessable 64-hex id, so a user mid-mint is never listed.
+ */
+export function toSettlementIndex(
+  jobs: TransactionJob[],
+): PublicTransactionStatus[] {
+  return jobs
+    .filter((job) => job.stage === "minted" && job.settlement)
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, SETTLEMENT_INDEX_LIMIT)
+    .map(toPublicTransactionStatus);
+}
+
 export async function startHealthServer(
   port: number,
   getHealth: () => ExecutorHealth,
   getTransaction?: (transactionId: string) => Promise<TransactionJob | null>,
   getMetrics?: () => Promise<Record<string, number>>,
   registerUserOp?: (entry: StoredUserOp) => Promise<void>,
+  listTransactions?: () => Promise<TransactionJob[]>,
 ): Promise<Server> {
   const server = createServer(async (request, response) => {
     if (request.method === "POST" && request.url === "/userops" && registerUserOp) {
@@ -219,6 +242,39 @@ export async function startHealthServer(
           "Cache-Control": "no-store",
         })
         .end(JSON.stringify(await getMetrics()));
+      return;
+    }
+    if (request.url === "/settlements" && listTransactions) {
+      const limit = transactionRequestAllowed(
+        request.socket.remoteAddress ?? "unknown",
+      );
+      if (!limit.allowed) {
+        response
+          .writeHead(429, {
+            "Content-Type": "application/json",
+            "Retry-After": String(limit.retryAfterSeconds),
+          })
+          .end(JSON.stringify({ status: "rate_limited" }));
+        return;
+      }
+      try {
+        const settlements = toSettlementIndex(await listTransactions());
+        response
+          .writeHead(200, {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-store",
+          })
+          .end(
+            JSON.stringify({
+              settlements,
+              checkedAt: new Date().toISOString(),
+            }),
+          );
+      } catch {
+        response
+          .writeHead(500, { "Content-Type": "application/json" })
+          .end(JSON.stringify({ status: "store_error" }));
+      }
       return;
     }
     const transactionMatch = request.url?.match(
