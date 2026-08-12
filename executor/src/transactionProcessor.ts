@@ -1,6 +1,7 @@
 import type { Address, Hex } from "viem";
 import {
   DirectMintingError,
+  truncatePublicErrorMessage,
   type DirectMintingSettlement,
   type SubmittedDirectMinting,
 } from "./flareExecutor";
@@ -38,11 +39,14 @@ export interface TransactionProcessorDependencies {
       transactionHash: Hex,
       assetManager: Address,
     ) => void | Promise<void>,
+    userOpData?: Hex,
   ): Promise<DirectMintingSettlement>;
   recoverMinting(
     submission: SubmittedDirectMinting,
     proof: XrpPaymentProof,
   ): Promise<DirectMintingSettlement>;
+  /** Resolve off-chain 0xFE userOp bytes for a Core Vault payment memo. */
+  resolveUserOp?(instruction: IncomingInstruction): Promise<Hex | undefined>;
   now(): number;
 }
 
@@ -86,16 +90,23 @@ function errorDetails(error: unknown): {
       "PAYMENT_TOO_SMALL",
       "UNEXPECTED_OUTCOME",
     ]);
+    // Vault CallFailed / bad userOp will not heal on retry — stop quickly.
+    const simulationPermanent = /CallFailed|hash mismatch|WrongExecutor/i.test(
+      error.message,
+    );
     return {
       code: error.code,
-      message: error.message,
-      retryable: !permanent.has(error.code),
+      message: truncatePublicErrorMessage(error.message),
+      retryable:
+        error.code === "SIMULATION_FAILED"
+          ? !simulationPermanent
+          : !permanent.has(error.code),
     };
   }
   if (error instanceof FdcProofError) {
     return {
       code: error.code,
-      message: error.message,
+      message: truncatePublicErrorMessage(error.message),
       retryable: ![
         "INVALID_INPUT",
         "MALFORMED_PROOF",
@@ -105,7 +116,9 @@ function errorDetails(error: unknown): {
   }
   return {
     code: "UNEXPECTED_ERROR",
-    message: error instanceof Error ? error.message : "Unknown executor error",
+    message: truncatePublicErrorMessage(
+      error instanceof Error ? error.message : "Unknown executor error",
+    ),
     retryable: true,
   };
 }
@@ -131,6 +144,7 @@ export class TransactionProcessor {
   }> {
     const now = this.dependencies.now();
     const id = normalizeTransactionId(instruction.txHash);
+    const userOpData = await this.dependencies.resolveUserOp?.(instruction);
     const result = await this.store.createIfAbsent({
       id,
       stage: "observed",
@@ -140,10 +154,15 @@ export class TransactionProcessor {
       createdAt: now,
       updatedAt: now,
       stageHistory: [{ stage: "observed", at: now }],
+      userOpData,
     });
+    if (result.created === false && userOpData && !result.job.userOpData) {
+      await this.store.update(id, (job) => ({ ...job, userOpData }));
+    }
     this.logger.info(result.created ? "transaction_observed" : "duplicate_event", {
       transactionId: id,
       stage: result.job.stage,
+      hasUserOp: Boolean(userOpData ?? result.job.userOpData),
     });
     if (
       this.options.autoProcessObserved !== false &&
@@ -261,6 +280,7 @@ export class TransactionProcessor {
               execution: { transactionHash, assetManager },
             });
           },
+          job.userOpData,
         );
       }
 

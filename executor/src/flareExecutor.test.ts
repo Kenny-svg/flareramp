@@ -16,6 +16,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it, vi } from "vitest";
 import {
   executeDirectMinting,
+  truncatePublicErrorMessage,
   type DirectMintingDependencies,
 } from "./flareExecutor";
 import type {
@@ -213,5 +214,21 @@ describe("executeDirectMinting", () => {
     expect(deps.simulate).toHaveBeenCalledBefore(
       deps.submit as ReturnType<typeof vi.fn>,
     );
+  });
+});
+
+describe("truncatePublicErrorMessage", () => {
+  it("keeps short messages intact", () => {
+    expect(truncatePublicErrorMessage("SIMULATION_FAILED: boom")).toBe(
+      "SIMULATION_FAILED: boom",
+    );
+  });
+
+  it("collapses whitespace and truncates long dumps", () => {
+    const dump = `SIMULATION_FAILED: failed\n\n${"0xab".repeat(400)}`;
+    const truncated = truncatePublicErrorMessage(dump);
+    expect(truncated.length).toBeLessThanOrEqual(280);
+    expect(truncated.endsWith("…")).toBe(true);
+    expect(truncated.includes("\n")).toBe(false);
   });
 });

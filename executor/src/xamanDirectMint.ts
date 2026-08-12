@@ -129,7 +129,7 @@ function paymentTemplateFromPayload(
     return null;
   }
   const memo = `0x${memoData}` as Hex;
-  const body = memo.slice(2);
+  const body = memo.slice(2).toLowerCase();
   try {
     if (
       body.length === 64 &&
@@ -151,6 +151,16 @@ function paymentTemplateFromPayload(
         amountDrops: transaction.Amount,
         recipient: getAddress(`0x${body.slice(16, 56)}`),
         executorAddress: getAddress(`0x${body.slice(56)}`),
+        memoData: memo,
+      };
+    }
+    if (body.length === 84 && body.startsWith("fe")) {
+      return {
+        sourceAddress: transaction.Account,
+        coreVaultAddress: transaction.Destination,
+        amountDrops: transaction.Amount,
+        // Smart Account mint routes by XRPL source; recipient is resolved off-memo.
+        recipient: getAddress("0x0000000000000000000000000000000000000000"),
         memoData: memo,
       };
     }

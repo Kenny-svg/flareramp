@@ -1,9 +1,9 @@
-import { DirectMintSigning } from "@/components/DirectMintSigning";
+import { HomeTabs } from "@/components/HomeTabs";
 
 export default function HomePage() {
   return (
     <main>
-      <DirectMintSigning />
+      <HomeTabs />
     </main>
   );
 }

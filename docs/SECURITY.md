@@ -2,9 +2,11 @@
 
 - FlareRamp never asks for an XRPL seed or user private key. Xaman signs the
   reviewed payment in the user's wallet.
-- The operator executor holds a testnet Coston2 key for FDC requests and
-  `executeDirectMinting`. Store it in a secret manager, never in source or a
-  client-visible environment variable.
+- The operator executor holds a testnet Coston2 key for FDC requests,
+  `executeDirectMinting`, and `executeDirectMintingWithData`. Store it in a
+  secret manager, never in source or a client-visible environment variable.
+- Wallet redeem (`redeemAmount` / `redeemWithTag`) is signed in the user's
+  MetaMask session; FlareRamp never custodians FXRP for redemptions.
 - The deployment is a single-operator system, not a decentralized or public
   executor network.
 - The hackathon build is XRPL Testnet/Coston2 only and has not undergone a

@@ -151,9 +151,10 @@ function decodeMemo(memo: Hex): {
   valid: boolean;
   recipient?: Address;
   executor?: Address;
+  smartAccountCustomInstruction?: boolean;
   reason?: string;
 } {
-  const body = memo.slice(2);
+  const body = memo.slice(2).toLowerCase();
   try {
     if (body.length === 64 && body.startsWith(DIRECT_MINTING_PREFIX)) {
       if (body.slice(16, 24) !== "00000000") {
@@ -171,12 +172,20 @@ function decodeMemo(memo: Hex): {
         executor: getAddress(`0x${body.slice(56)}`),
       };
     }
+    // Smart Accounts 0xFE custom instruction: 42 bytes.
+    if (body.length === 84 && body.startsWith("fe")) {
+      return {
+        valid: true,
+        smartAccountCustomInstruction: true,
+      };
+    }
   } catch {
     return { valid: false, reason: "Memo contains an invalid EVM address" };
   }
   return {
     valid: false,
-    reason: "Memo is not a supported 32-byte or 48-byte direct-mint format",
+    reason:
+      "Memo is not a supported direct-mint or Smart Accounts 0xFE custom-instruction format",
   };
 }
 
@@ -448,7 +457,11 @@ export async function checkMintReadiness(
   let tagSnapshot: MintingTagSnapshot | null = null;
   if (request.memoData !== undefined && request.destinationTag === undefined) {
     const decoded = decodeMemo(request.memoData);
-    if (
+    if (decoded.valid && decoded.smartAccountCustomInstruction) {
+      routingStatus = "pass";
+      routingMessage =
+        "42-byte 0xFE memo commits a Smart Accounts custom instruction (mint + vault deposit)";
+    } else if (
       decoded.valid &&
       decoded.recipient &&
       isAddressEqual(decoded.recipient, request.recipient)
