@@ -16,7 +16,13 @@ import {
   createXamanDirectMintService,
   type DirectMintPaymentTemplate,
 } from "flareramp-executor/xaman-direct-mint";
-import { getAddress, type Address, type Hex, zeroAddress } from "viem";
+import {
+  getAddress,
+  isAddress,
+  type Address,
+  type Hex,
+  zeroAddress,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import {
   buildFeCustomInstructionMemo,
@@ -50,6 +56,12 @@ export interface MintReviewInput {
   recipient?: string;
   amountXrp: string;
   destination?: MintDestinationKind;
+  /**
+   * Vault destinations only: address credited with the ERC-4626 vault shares.
+   * Defaults to the sender's Personal Account. Committed inside the signed
+   * memo, so it cannot be changed after the XRPL payment is signed.
+   */
+  shareReceiver?: string;
 }
 
 export type MintPath =
@@ -73,6 +85,10 @@ export interface MintReview {
     memoData: Hex;
     vaultAddress?: Address;
     personalAccount?: Address;
+    /** Vault destinations only: address credited with the vault shares. */
+    shareReceiver?: Address;
+    /** False when the user directed shares away from their Personal Account. */
+    shareReceiverIsPersonalAccount?: boolean;
   };
   fees: {
     mintingFeeDrops: string;
@@ -146,6 +162,8 @@ function toReview(
     userOpHash?: Hex;
     vaultAddress?: Address;
     personalAccount?: Address;
+    shareReceiver?: Address;
+    shareReceiverIsPersonalAccount?: boolean;
   },
 ): MintReview {
   if (!result.parameters || !result.quote || !result.ftso) {
@@ -167,6 +185,8 @@ function toReview(
       memoData: result.request.memoData!,
       vaultAddress: extras?.vaultAddress,
       personalAccount: extras?.personalAccount,
+      shareReceiver: extras?.shareReceiver,
+      shareReceiverIsPersonalAccount: extras?.shareReceiverIsPersonalAccount,
     },
     fees: {
       mintingFeeDrops: result.quote.mintingFeeUBA.toString(),
@@ -183,6 +203,53 @@ function toReview(
     userOpHash: extras?.userOpHash,
     checks: result.checks,
   };
+}
+
+/**
+ * Headroom subtracted from the predicted mint before it is baked into the
+ * vault deposit. See the rationale at the call site: this buys immunity to an
+ * atomic revert at the cost of a few UBA of dust.
+ */
+export const VAULT_DEPOSIT_HEADROOM_BIPS = 25n;
+
+/**
+ * Resolves the ERC-4626 share recipient, defaulting to the Personal Account.
+ *
+ * Validation is strict and happens here rather than at the edge because the
+ * result is committed inside keccak256(userOp) in the signed memo: a bad
+ * address cannot be corrected once the XRPL payment is signed, and the
+ * executor will faithfully execute whatever was committed.
+ */
+export function resolveShareReceiver(
+  requested: string | undefined,
+  personalAccount: Address,
+): Address {
+  const trimmed = requested?.trim();
+  if (!trimmed) return personalAccount;
+
+  // Deliberately NOT getAddress() alone: viem re-checksums rather than
+  // rejecting, so a single mistyped character in a mixed-case address yields a
+  // *different valid address* and the shares go somewhere unrecoverable. An
+  // all-lowercase address carries no checksum to verify, so it is accepted and
+  // normalised; a mixed-case one must checksum correctly.
+  const hasMixedCase =
+    trimmed !== trimmed.toLowerCase() && trimmed !== trimmed.toUpperCase();
+  const valid = hasMixedCase
+    ? isAddress(trimmed, { strict: true })
+    : isAddress(trimmed, { strict: false });
+  if (!valid) {
+    throw new Error(
+      hasMixedCase
+        ? "Vault share recipient failed its address checksum — re-copy the address"
+        : "Vault share recipient must be a valid Coston2 address",
+    );
+  }
+
+  const normalized = getAddress(trimmed);
+  if (normalized === zeroAddress) {
+    throw new Error("Vault share recipient cannot be the zero address");
+  }
+  return normalized;
 }
 
 async function resolvePersonalAccount(xrplAddress: string): Promise<Address> {
@@ -266,17 +333,38 @@ export async function createMintReview(
     throw new Error("Live protocol data is incomplete; signing is disabled");
   }
 
-  const depositAmount = provisional.quote.expectedFXRPUBA;
-  if (depositAmount <= 0n) {
+  // The memo commits keccak256(userOp) before the mint executes, so the amount
+  // baked into approve/deposit is a *prediction* from the fee quote. That quote
+  // is plain arithmetic over mintingFeeBIPS / minimumMintingFeeUBA /
+  // executorFeeUBA read at quote time and models no AMG rounding, so the real
+  // minted amount can land fractionally under it. Because the 0xFE path is
+  // atomic, a deposit that tries to pull more than the Personal Account holds
+  // reverts the entire mint into 0xE0 recovery.
+  //
+  // Depositing a hair under the prediction trades a few UBA of dust left in the
+  // Personal Account for immunity to that whole failure class. The proper fix
+  // is a Zap contract reading FXRP.balanceOf(msg.sender) at execution time, so
+  // no amount has to be predicted at all — tracked as follow-up work.
+  const expectedFXRP = provisional.quote.expectedFXRPUBA;
+  if (expectedFXRP <= 0n) {
     throw new Error("Expected FXRP after fees is zero; increase the payment");
   }
+  const depositAmount =
+    expectedFXRP - (expectedFXRP * VAULT_DEPOSIT_HEADROOM_BIPS) / 10_000n;
+  if (depositAmount <= 0n) {
+    throw new Error(
+      "Payment is too small to cover the vault deposit headroom; increase the payment",
+    );
+  }
 
+  const shareReceiver = resolveShareReceiver(input.shareReceiver, personalAccount);
   const calls = buildVaultDepositCalls({
     protocol: vault.protocol,
     fxrpToken,
     vault: vault.vaultAddress,
     personalAccount,
     amountUBA: depositAmount,
+    shareReceiver,
   });
   const userOp = buildPackedUserOperation({
     sender: personalAccount,
@@ -303,10 +391,34 @@ export async function createMintReview(
   );
 
   // Annotate destination choice in checks for the UI.
+  const shareReceiverIsPersonalAccount = shareReceiver === personalAccount;
   result.checks.push({
     id: "mint_destination",
     status: "pass",
     message: `${destinationLabel(destination)} via Smart Account ${personalAccount}`,
+    source: vault.vaultAddress,
+    timestamp: result.checkedAt,
+  });
+  // Surfaced as its own check because it is irreversible once signed: the
+  // recipient is committed in the memo hash, not chosen at execution time.
+  result.checks.push({
+    id: "vault_share_recipient",
+    // `warn` rather than `pass` when redirected: it does not block signing
+    // (only `fail` does), but it renders prominently and expands by default,
+    // which is what an irreversible choice deserves.
+    status: shareReceiverIsPersonalAccount ? "pass" : "warn",
+    message: shareReceiverIsPersonalAccount
+      ? `Vault shares credited to your Smart Account ${personalAccount}`
+      : `Vault shares credited to ${shareReceiver} — not your Smart Account. This is committed in the signed memo and cannot be changed afterwards.`,
+    source: vault.vaultAddress,
+    timestamp: result.checkedAt,
+  });
+  result.checks.push({
+    id: "vault_deposit_amount",
+    status: "pass",
+    message: `Depositing ${depositAmount} UBA of an expected ${expectedFXRP} UBA; the ${
+      expectedFXRP - depositAmount
+    } UBA difference stays in the Smart Account so rounding cannot revert the mint`,
     source: vault.vaultAddress,
     timestamp: result.checkedAt,
   });
@@ -316,6 +428,8 @@ export async function createMintReview(
     userOpHash,
     vaultAddress: vault.vaultAddress,
     personalAccount,
+    shareReceiver,
+    shareReceiverIsPersonalAccount,
   });
 }
 

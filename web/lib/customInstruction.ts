@@ -114,16 +114,37 @@ export function buildFeCustomInstructionMemo(params: {
   return `0xfe${walletId.toString(16).padStart(2, "0")}${fee}${hash}` as Hex;
 }
 
+/**
+ * Builds the `approve` + `deposit` batch executed by the Personal Account
+ * under a `0xFE` custom instruction.
+ *
+ * Two distinct addresses are in play and only one of them is forced:
+ *
+ * - The Personal Account is the *spender*. It must hold the freshly minted
+ *   FXRP, because the userOp's `sender` is the Personal Account and the batch
+ *   is executed as that account. This is structural and not configurable.
+ * - The ERC-4626 `receiver` is the address credited with vault shares, and is
+ *   arbitrary by design. Defaulting it to the Personal Account leaves the
+ *   position drivable only through further XRPL custom instructions, so
+ *   callers can direct shares to an address the user already controls (an EVM
+ *   wallet, say) instead.
+ *
+ * `shareReceiver` is committed inside keccak256(userOp) in the memo before the
+ * XRPL payment is signed, so it cannot be corrected after the fact — validate
+ * it upstream and show it to the user before signing.
+ */
 export function buildVaultDepositCalls(params: {
   protocol: "Firelight" | "Upshift";
   fxrpToken: Address;
   vault: Address;
   personalAccount: Address;
   amountUBA: bigint;
+  /** Vault-share recipient. Defaults to the Personal Account. */
+  shareReceiver?: Address;
 }): PersonalAccountCall[] {
   const vault = getAddress(params.vault);
   const token = getAddress(params.fxrpToken);
-  const receiver = getAddress(params.personalAccount);
+  const receiver = getAddress(params.shareReceiver ?? params.personalAccount);
   const approveData = encodeFunctionData({
     abi: ERC20_APPROVE_ABI,
     functionName: "approve",

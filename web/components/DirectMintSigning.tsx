@@ -36,6 +36,8 @@ interface MintReview {
     memoData: string;
     vaultAddress?: string;
     personalAccount?: string;
+    shareReceiver?: string;
+    shareReceiverIsPersonalAccount?: boolean;
   };
   fees: {
     mintingFeeDrops: string;
@@ -174,6 +176,11 @@ export function DirectMintSigning() {
   const [vaultError, setVaultError] = useState<string | null>(null);
   const [sourceAddress, setSourceAddress] = useState("");
   const [recipient, setRecipient] = useState("");
+  // Vault destinations only. Blank means "credit shares to the Personal
+  // Account" — the safe default, kept behind a disclosure because the value is
+  // committed in the signed memo and cannot be corrected afterwards.
+  const [shareReceiver, setShareReceiver] = useState("");
+  const [shareReceiverOpen, setShareReceiverOpen] = useState(false);
   const [amountXrp, setAmountXrp] = useState("1");
   const [review, setReview] = useState<MintReview | null>(null);
   const [signing, setSigning] = useState<SigningRequest | null>(null);
@@ -349,6 +356,9 @@ export function DirectMintSigning() {
           recipient: isVaultDestination(destination) ? undefined : recipient,
           amountXrp,
           destination,
+          shareReceiver: isVaultDestination(destination)
+            ? shareReceiver.trim() || undefined
+            : undefined,
         }),
       });
       const data = (await response.json()) as MintReview | { error: string };
@@ -376,6 +386,9 @@ export function DirectMintSigning() {
           recipient: isVaultDestination(destination) ? undefined : recipient,
           amountXrp,
           destination,
+          shareReceiver: isVaultDestination(destination)
+            ? shareReceiver.trim() || undefined
+            : undefined,
         }),
       });
       const data = (await response.json()) as
@@ -648,6 +661,10 @@ export function DirectMintSigning() {
                 <p className="mt-2 text-sm font-mono text-zinc-300 bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3">
                   Derived from XRPL source
                 </p>
+                <p className="mt-2 normal-case font-normal tracking-normal text-xs text-zinc-500">
+                  FXRP must land in your Smart Account for the vault deposit to
+                  execute. Vault shares can go elsewhere.
+                </p>
               </div>
             )}
             <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-400">
@@ -661,6 +678,50 @@ export function DirectMintSigning() {
               />
             </label>
           </div>
+          {isVaultDestination(destination) && (
+            <div className="md:col-span-4">
+              {!shareReceiverOpen ? (
+                <button
+                  type="button"
+                  onClick={() => setShareReceiverOpen(true)}
+                  disabled={flowLocked}
+                  className="text-xs font-semibold uppercase tracking-wider text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  + Send vault shares to a different address
+                </button>
+              ) : (
+                <div className="border border-zinc-800 bg-zinc-950/40 rounded-xl p-4">
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                    Vault share recipient
+                    <input
+                      value={shareReceiver}
+                      onChange={(event) => setShareReceiver(event.target.value)}
+                      placeholder="0x… (leave blank to use your Smart Account)"
+                      disabled={flowLocked}
+                      className="mt-2 block w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500 placeholder-zinc-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-mono text-sm"
+                    />
+                  </label>
+                  <p className="mt-3 text-xs text-amber-400/90 leading-relaxed">
+                    This address is committed inside the memo you sign, so it
+                    cannot be changed or recovered afterwards. Shares sent to an
+                    address you do not control are unrecoverable. Leave blank to
+                    credit your Smart Account.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShareReceiver("");
+                      setShareReceiverOpen(false);
+                    }}
+                    disabled={flowLocked}
+                    className="mt-3 text-xs font-semibold uppercase tracking-wider text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Use my Smart Account instead
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           <button
             onClick={prepareReview}
             disabled={busy || flowLocked}
