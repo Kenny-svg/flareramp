@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isAddress } from "viem";
 import type { LiquidityNode, LiquidityOverview } from "@/lib/server/liquidityMap";
 import type { VaultPosition } from "@/lib/server/vaultPosition";
@@ -99,6 +99,10 @@ export function LiquidityMap() {
   const [position, setPosition] = useState<VaultPosition | null>(null);
   const [positionLoading, setPositionLoading] = useState(false);
   const [positionError, setPositionError] = useState<string | null>(null);
+  // Bumped on every load so an in-flight request whose response arrives after
+  // a newer one (rapid re-clicks, or switching the address mid-request)
+  // cannot overwrite the latest position with stale data.
+  const positionRequestIdRef = useRef(0);
 
   function selectNode(vaultAddress: string | null) {
     setSelected(vaultAddress);
@@ -111,20 +115,28 @@ export function LiquidityMap() {
       setPositionError("Enter a valid EVM address (0x...)");
       return;
     }
+    const requestId = ++positionRequestIdRef.current;
     setPositionLoading(true);
     setPositionError(null);
+    // Clear the previous position immediately: leaving it on screen through
+    // the fetch means a balance from a prior address reads as "the answer"
+    // until this request resolves — the "wrong number until I click again"
+    // symptom.
+    setPosition(null);
     try {
       const response = await fetch(`/api/liquidity/position?vault=${vaultAddress}&address=${positionAddress}`, {
         cache: "no-store",
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Could not load vault position");
+      if (positionRequestIdRef.current !== requestId) return;
       setPosition(body as VaultPosition);
     } catch (err) {
+      if (positionRequestIdRef.current !== requestId) return;
       setPositionError(err instanceof Error ? err.message : "Could not load vault position");
       setPosition(null);
     } finally {
-      setPositionLoading(false);
+      if (positionRequestIdRef.current === requestId) setPositionLoading(false);
     }
   }
 

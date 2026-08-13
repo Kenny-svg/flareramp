@@ -49,7 +49,7 @@ function messageFromResponse(value: unknown, fallback: string): string {
 
 export function ReverseRedeem() {
   const [walletAddress, setWalletAddress] = useState("");
-  const [amountFxrp, setAmountFxrp] = useState("0.8");
+  const [amountFxrp, setAmountFxrp] = useState("5");
   const [xrplDestination, setXrplDestination] = useState("");
   const [destinationTag, setDestinationTag] = useState("");
   const [quote, setQuote] = useState<RedeemWritePayload | null>(null);
@@ -170,6 +170,15 @@ export function ReverseRedeem() {
     }
   }
 
+  // Compared as UBA bigints, not the formatted display strings: amountFxrp /
+  // balanceFxrp are decimal strings ("10.5"), and string comparison sorts
+  // lexicographically ("10" < "5"), not numerically — the previous check here
+  // was effectively meaningless. UBA is an integer string straight from the
+  // chain, so BigInt comparison is exact with no floating-point rounding.
+  const insufficientBalance = quote
+    ? BigInt(quote.quote.balanceUBA) < BigInt(quote.quote.amountUBA)
+    : false;
+
   return (
     <section className="max-w-4xl mx-auto px-4 pt-4 pb-12">
       <header className="mb-8">
@@ -239,9 +248,9 @@ export function ReverseRedeem() {
           </button>
           <button
             type="button"
-            disabled={busy || !quote}
+            disabled={busy || !quote || insufficientBalance}
             onClick={() => void submitRedeem()}
-            className="px-4 py-3 text-sm font-semibold uppercase tracking-wider border border-brand-500 text-brand-400 hover:bg-brand-950/30 disabled:opacity-50"
+            className="px-4 py-3 text-sm font-semibold uppercase tracking-wider border border-brand-500 text-brand-400 hover:bg-brand-950/30 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Submit in MetaMask
           </button>
@@ -250,6 +259,14 @@ export function ReverseRedeem() {
         {error && (
           <p role="alert" className="text-sm text-red-400">
             {error}
+          </p>
+        )}
+
+        {insufficientBalance && quote && (
+          <p role="alert" className="text-sm text-red-400">
+            Wallet balance ({quote.quote.balanceFxrp} FXRP) is less than the redeem
+            amount ({quote.quote.amountFxrp} FXRP) — lower the amount or fund the
+            wallet before submitting.
           </p>
         )}
 

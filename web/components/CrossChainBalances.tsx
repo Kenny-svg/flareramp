@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { isAddress } from "viem";
 import type { CrossChainBalancesResult } from "@/lib/server/crossChainBalances";
 
@@ -24,24 +24,36 @@ export function CrossChainBalances() {
   const [result, setResult] = useState<CrossChainBalancesResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Bumped on every load so an in-flight request whose response arrives after
+  // a newer one (e.g. two rapid clicks, or a network switch mid-request)
+  // cannot overwrite the latest result with stale data.
+  const requestIdRef = useRef(0);
 
   async function loadAll() {
     if (!isAddress(input)) {
       setError("Enter a valid EVM address (0x...)");
       return;
     }
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
+    // Clear the previous result immediately rather than leaving it on screen
+    // through the fetch: otherwise a stale balance from an earlier address or
+    // network reads as "the answer" until this request resolves, which is
+    // exactly the "shows the wrong number, click again" symptom.
+    setResult(null);
     try {
       const response = await fetch(`/api/portfolio/balances?address=${input}&network=${network}`, { cache: "no-store" });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Could not load cross-chain balances");
+      if (requestIdRef.current !== requestId) return;
       setResult(body as CrossChainBalancesResult);
     } catch (err) {
+      if (requestIdRef.current !== requestId) return;
       setError(err instanceof Error ? err.message : "Could not load cross-chain balances");
       setResult(null);
     } finally {
-      setLoading(false);
+      if (requestIdRef.current === requestId) setLoading(false);
     }
   }
 
