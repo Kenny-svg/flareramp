@@ -430,6 +430,12 @@ export function LiquidityMap() {
                         <dt className="text-zinc-500">{position.shareSymbol} allowance to vault</dt>
                         <dd className="text-zinc-200">{position.shareAllowanceToVault}</dd>
                       </div>
+                      {position.unstable && (
+                        <p className="text-amber-400 text-xs mt-2">
+                          ⚠ Repeated balance reads disagreed within the retry budget — the figures
+                          above are the last read, not confirmed. Load position again to retry.
+                        </p>
+                      )}
                     </dl>
                   )}
                 </div>

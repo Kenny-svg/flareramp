@@ -262,14 +262,6 @@ export function ReverseRedeem() {
           </p>
         )}
 
-        {insufficientBalance && quote && (
-          <p role="alert" className="text-sm text-red-400">
-            Wallet balance ({quote.quote.balanceFxrp} FXRP) is less than the redeem
-            amount ({quote.quote.amountFxrp} FXRP) — lower the amount or fund the
-            wallet before submitting.
-          </p>
-        )}
-
         {quote && (
           <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
             <div className="bg-zinc-950/40 border border-zinc-900 p-3 rounded-xl">

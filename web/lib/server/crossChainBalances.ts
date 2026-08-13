@@ -4,6 +4,7 @@ import { createPublicClient, http, formatUnits, type Address, type Chain, type P
 import { ERC20_ABI, getFxrpTokenAddress, getPublicClient } from "../contracts";
 import { flareMainnet, coston2, ethereumMainnet, base, bnbSmartChain, hyperEvm, katana, hyperliquidTestnet } from "../chains";
 import { FXRP_OFT_DEPLOYMENTS, FXRP_OFT_TESTNET_DEPLOYMENTS, type OftDeployment } from "../oftDeployments";
+import { readStableUint256 } from "./stableRead";
 import type { FassetsNetwork } from "./agentRisk";
 
 export interface ChainBalanceRow {
@@ -11,6 +12,10 @@ export interface ChainBalanceRow {
   chainId: number | null;
   balance: string | null;
   status: "loaded" | "not-configured" | "error";
+  /** True if repeated reads of this balance disagreed within the retry
+   *  budget — the displayed figure is the last read, not a confirmed one.
+   *  See stableRead.ts. */
+  unstable?: boolean;
 }
 
 export interface CrossChainBalancesResult {
@@ -46,11 +51,19 @@ async function loadHomeChainRow(network: FassetsNetwork, address: Address): Prom
   try {
     const client = getPublicClient(network);
     const fxrpToken = await getFxrpTokenAddress(network);
-    const [balance, decimals] = await Promise.all([
-      client.readContract({ address: fxrpToken, abi: ERC20_ABI, functionName: "balanceOf", args: [address] }),
+    const [balanceRead, decimals] = await Promise.all([
+      readStableUint256(() =>
+        client.readContract({ address: fxrpToken, abi: ERC20_ABI, functionName: "balanceOf", args: [address] }),
+      ),
       client.readContract({ address: fxrpToken, abi: ERC20_ABI, functionName: "decimals" }),
     ]);
-    return { chainName: chain.name, chainId: chain.id, balance: formatUnits(balance, decimals), status: "loaded" };
+    return {
+      chainName: chain.name,
+      chainId: chain.id,
+      balance: formatUnits(balanceRead.value, decimals),
+      status: "loaded",
+      unstable: !balanceRead.stable,
+    };
   } catch {
     return { chainName: chain.name, chainId: chain.id, balance: null, status: "error" };
   }
@@ -64,12 +77,24 @@ async function loadOftRow(address: Address, deployment: OftDeployment, candidate
   if (!client) {
     return { chainName: deployment.chainName, chainId: deployment.chainId, balance: null, status: "not-configured" };
   }
+  // Captured into a local so the non-null narrowing above survives into the
+  // closure passed to readStableUint256 — a property access on `deployment`
+  // would not.
+  const fxrpOftAddress = deployment.fxrpOftAddress;
   try {
-    const [balance, decimals] = await Promise.all([
-      client.readContract({ address: deployment.fxrpOftAddress, abi: ERC20_ABI, functionName: "balanceOf", args: [address] }),
-      client.readContract({ address: deployment.fxrpOftAddress, abi: ERC20_ABI, functionName: "decimals" }),
+    const [balanceRead, decimals] = await Promise.all([
+      readStableUint256(() =>
+        client.readContract({ address: fxrpOftAddress, abi: ERC20_ABI, functionName: "balanceOf", args: [address] }),
+      ),
+      client.readContract({ address: fxrpOftAddress, abi: ERC20_ABI, functionName: "decimals" }),
     ]);
-    return { chainName: deployment.chainName, chainId: deployment.chainId, balance: formatUnits(balance, decimals), status: "loaded" };
+    return {
+      chainName: deployment.chainName,
+      chainId: deployment.chainId,
+      balance: formatUnits(balanceRead.value, decimals),
+      status: "loaded",
+      unstable: !balanceRead.stable,
+    };
   } catch {
     return { chainName: deployment.chainName, chainId: deployment.chainId, balance: null, status: "error" };
   }

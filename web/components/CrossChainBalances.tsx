@@ -115,7 +115,17 @@ export function CrossChainBalances() {
                 .map((row) => (
                 <tr key={row.chainName} className="border-b border-zinc-900">
                   <td className="py-3 pr-4 text-zinc-300">{row.chainName}</td>
-                  <td className="py-3 pr-4 text-zinc-400">{row.balance}</td>
+                  <td className="py-3 pr-4 text-zinc-400">
+                    {row.balance}
+                    {row.unstable && (
+                      <span
+                        title="Repeated reads of this balance disagreed within the retry budget — showing the last read, not a confirmed value. Reload to try again."
+                        className="ml-2 text-amber-400 cursor-help"
+                      >
+                        ⚠
+                      </span>
+                    )}
+                  </td>
                 </tr>
               ))}
               <tr>

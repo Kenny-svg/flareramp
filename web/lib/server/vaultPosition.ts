@@ -4,6 +4,7 @@ import { formatUnits, type Address } from "viem";
 import { ERC20_ABI, getPublicClient } from "../contracts";
 import { FIRELIGHT_VAULT_ABI, UPSHIFT_VAULT_ABI } from "../vaultContracts";
 import { COSTON2_VAULT_DEPLOYMENTS, type VaultDeployment } from "../vaultDeployments";
+import { readStableUint256 } from "./stableRead";
 
 export interface VaultPosition {
   protocol: "Firelight" | "Upshift";
@@ -16,6 +17,9 @@ export interface VaultPosition {
   shareBalance: string;
   shareAllowanceToVault: string;
   checkedAt: string;
+  /** True if a repeated balance read disagreed within the retry budget — see
+   *  stableRead.ts. Applies to assetBalance and/or shareBalance. */
+  unstable?: boolean;
 }
 
 function findDeployment(vaultAddress: string): VaultDeployment {
@@ -49,7 +53,7 @@ export async function getVaultPosition(
   });
   const shareTokenAddress = vaultAddress;
 
-  const [assetSymbol, assetDecimals, assetBalance, assetAllowance] =
+  const [assetSymbol, assetDecimals, assetBalanceRead, assetAllowance] =
     await Promise.all([
       client.readContract({
         address: assetAddress,
@@ -61,12 +65,14 @@ export async function getVaultPosition(
         abi: ERC20_ABI,
         functionName: "decimals",
       }),
-      client.readContract({
-        address: assetAddress,
-        abi: ERC20_ABI,
-        functionName: "balanceOf",
-        args: [userAddress],
-      }),
+      readStableUint256(() =>
+        client.readContract({
+          address: assetAddress,
+          abi: ERC20_ABI,
+          functionName: "balanceOf",
+          args: [userAddress],
+        }),
+      ),
       client.readContract({
         address: assetAddress,
         abi: ERC20_ABI,
@@ -75,7 +81,7 @@ export async function getVaultPosition(
       }),
     ]);
 
-  const [shareSymbol, shareDecimals, shareBalance, shareAllowance] =
+  const [shareSymbol, shareDecimals, shareBalanceRead, shareAllowance] =
     await Promise.all([
       client.readContract({
         address: shareTokenAddress,
@@ -87,12 +93,14 @@ export async function getVaultPosition(
         abi: ERC20_ABI,
         functionName: "decimals",
       }),
-      client.readContract({
-        address: shareTokenAddress,
-        abi: ERC20_ABI,
-        functionName: "balanceOf",
-        args: [userAddress],
-      }),
+      readStableUint256(() =>
+        client.readContract({
+          address: shareTokenAddress,
+          abi: ERC20_ABI,
+          functionName: "balanceOf",
+          args: [userAddress],
+        }),
+      ),
       client.readContract({
         address: shareTokenAddress,
         abi: ERC20_ABI,
@@ -106,11 +114,12 @@ export async function getVaultPosition(
     vaultAddress,
     userAddress,
     assetSymbol,
-    assetBalance: formatUnits(assetBalance, assetDecimals),
+    assetBalance: formatUnits(assetBalanceRead.value, assetDecimals),
     assetAllowanceToVault: formatUnits(assetAllowance, assetDecimals),
     shareSymbol,
-    shareBalance: formatUnits(shareBalance, shareDecimals),
+    shareBalance: formatUnits(shareBalanceRead.value, shareDecimals),
     shareAllowanceToVault: formatUnits(shareAllowance, shareDecimals),
     checkedAt: new Date().toISOString(),
+    unstable: !assetBalanceRead.stable || !shareBalanceRead.stable,
   };
 }
