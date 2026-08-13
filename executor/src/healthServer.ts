@@ -11,6 +11,7 @@ export interface ExecutorHealth {
 
 export interface PublicTransactionStatus {
   transactionId: string;
+  kind?: TransactionJob["kind"];
   stage: TransactionJob["stage"];
   attempts: number;
   createdAt: string;
@@ -37,12 +38,15 @@ export interface PublicTransactionStatus {
   settlement?: {
     flareTransactionHash: string;
     blockNumber: string;
-    recipient: string;
-    executor: string;
-    mintedAmountUBA: string;
-    mintingFeeUBA: string;
-    executorFeeUBA: string;
+    recipient?: string;
+    executor?: string;
+    mintedAmountUBA?: string;
+    mintingFeeUBA?: string;
+    executorFeeUBA?: string;
     vaultDeposit?: boolean;
+    personalAccount?: string;
+    instructionId?: string;
+    xrplOwner?: string;
   };
   error?: {
     code: string;
@@ -55,8 +59,16 @@ export interface PublicTransactionStatus {
 export function toPublicTransactionStatus(
   job: TransactionJob,
 ): PublicTransactionStatus {
+  const settlement = job.settlement;
+  const mintSettlement =
+    settlement && settlement.status === "executed" ? settlement : undefined;
+  const instructionSettlement =
+    settlement && settlement.status === "instruction_executed"
+      ? settlement
+      : undefined;
   return {
     transactionId: job.id,
+    kind: job.kind ?? "mint",
     stage: job.stage,
     attempts: job.attempts,
     createdAt: new Date(job.createdAt).toISOString(),
@@ -85,18 +97,26 @@ export function toPublicTransactionStatus(
         }
       : undefined,
     execution: job.execution,
-    settlement: job.settlement
+    settlement: mintSettlement
       ? {
-          flareTransactionHash: job.settlement.flareTransactionHash,
-          blockNumber: job.settlement.blockNumber.toString(),
-          recipient: job.settlement.recipient,
-          executor: job.settlement.executor,
-          mintedAmountUBA: job.settlement.mintedAmountUBA.toString(),
-          mintingFeeUBA: job.settlement.mintingFeeUBA.toString(),
-          executorFeeUBA: job.settlement.executorFeeUBA.toString(),
-          vaultDeposit: job.settlement.vaultDeposit,
+          flareTransactionHash: mintSettlement.flareTransactionHash,
+          blockNumber: mintSettlement.blockNumber.toString(),
+          recipient: mintSettlement.recipient,
+          executor: mintSettlement.executor,
+          mintedAmountUBA: mintSettlement.mintedAmountUBA.toString(),
+          mintingFeeUBA: mintSettlement.mintingFeeUBA.toString(),
+          executorFeeUBA: mintSettlement.executorFeeUBA.toString(),
+          vaultDeposit: mintSettlement.vaultDeposit,
         }
-      : undefined,
+      : instructionSettlement
+        ? {
+            flareTransactionHash: instructionSettlement.flareTransactionHash,
+            blockNumber: instructionSettlement.blockNumber.toString(),
+            personalAccount: instructionSettlement.personalAccount,
+            instructionId: instructionSettlement.instructionId.toString(),
+            xrplOwner: instructionSettlement.xrplOwner,
+          }
+        : undefined,
     error: job.lastError
       ? {
           code: job.lastError.code,

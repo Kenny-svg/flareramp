@@ -43,14 +43,22 @@ export function CrossChainBalances() {
     // exactly the "shows the wrong number, click again" symptom.
     setResult(null);
     try {
-      const response = await fetch(`/api/portfolio/balances?address=${input}&network=${network}`, { cache: "no-store" });
+      const response = await fetch(
+        `/api/portfolio/balances?address=${input}&network=${network}`,
+        { cache: "no-store" },
+      );
       const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Could not load cross-chain balances");
+      if (!response.ok)
+        throw new Error(body.error ?? "Could not load cross-chain balances");
       if (requestIdRef.current !== requestId) return;
       setResult(body as CrossChainBalancesResult);
     } catch (err) {
       if (requestIdRef.current !== requestId) return;
-      setError(err instanceof Error ? err.message : "Could not load cross-chain balances");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not load cross-chain balances",
+      );
       setResult(null);
     } finally {
       if (requestIdRef.current === requestId) setLoading(false);
@@ -61,10 +69,12 @@ export function CrossChainBalances() {
     <section className="bg-zinc-900/30 border border-zinc-800/80 backdrop-blur-md p-6 rounded-2xl shadow-xl">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-1">
         <div>
-          <h2 className="text-xl font-black tracking-tight text-white">Cross-Chain FXRP</h2>
+          <h2 className="text-xl font-black tracking-tight text-white">
+            Cross-Chain FXRP
+          </h2>
           <p className="text-zinc-400 text-sm mt-1">
-            FXRP balance on {network === "coston2" ? "Coston2" : "Flare"} plus every chain where its LayerZero OFT
-            is deployed.
+            FXRP balance on {network === "coston2" ? "Coston2" : "Flare"} plus
+            every chain where its LayerZero OFT is deployed.
           </p>
         </div>
         <select
@@ -97,7 +107,9 @@ export function CrossChainBalances() {
       </div>
 
       {error && (
-        <p className="text-red-400 text-sm mb-4 bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3">{error}</p>
+        <p className="text-red-400 text-sm mb-4 bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3">
+          {error}
+        </p>
       )}
 
       {result && (
@@ -111,30 +123,39 @@ export function CrossChainBalances() {
             </thead>
             <tbody>
               {result.rows
-                .filter((row) => row.status === "loaded" && row.balance !== null && Number(row.balance) >= 0)
+                .filter(
+                  (row) =>
+                    row.status === "loaded" &&
+                    row.balance !== null &&
+                    Number(row.balance) >= 0,
+                )
                 .map((row) => (
-                <tr key={row.chainName} className="border-b border-zinc-900">
-                  <td className="py-3 pr-4 text-zinc-300">{row.chainName}</td>
-                  <td className="py-3 pr-4 text-zinc-400">
-                    {row.balance}
-                    {row.unstable && (
-                      <span
-                        title="Repeated reads of this balance disagreed within the retry budget — showing the last read, not a confirmed value. Reload to try again."
-                        className="ml-2 text-amber-400 cursor-help"
-                      >
-                        ⚠
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))}
+                  <tr key={row.chainName} className="border-b border-zinc-900">
+                    <td className="py-3 pr-4 text-zinc-300">{row.chainName}</td>
+                    <td className="py-3 pr-4 text-zinc-400">
+                      {row.balance}
+                      {row.unstable && (
+                        <span
+                          title="Repeated reads of this balance disagreed within the retry budget — showing the last read, not a confirmed value. Reload to try again."
+                          className="ml-2 text-amber-400 cursor-help"
+                        >
+                          ⚠
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
               <tr>
                 <td className="py-3 pr-4 font-bold text-white">Total</td>
-                <td className="py-3 pr-4 font-bold text-white">{result.totalFxrp} FXRP</td>
+                <td className="py-3 pr-4 font-bold text-white">
+                  {result.totalFxrp} FXRP
+                </td>
               </tr>
             </tbody>
           </table>
-          <p className="text-zinc-600 text-xs mt-4">checked {new Date(result.checkedAt).toLocaleTimeString()}</p>
+          <p className="text-zinc-600 text-xs mt-4">
+            checked {new Date(result.checkedAt).toLocaleTimeString()}
+          </p>
         </div>
       )}
     </section>

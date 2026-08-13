@@ -100,6 +100,8 @@ export const MAX_PUBLIC_ERROR_MESSAGE_LENGTH = 280;
 
 const KNOWN_REVERT_SELECTORS: Record<string, string> = {
   "0xa5fa8d2b": "CallFailed (Smart Account vault call reverted)",
+  "0x95dece8d":
+    "NoWithdrawalAmount (Firelight claim period has nothing to claim — use the vault period id from withdraw, after the period ends)",
 };
 
 export function truncatePublicErrorMessage(
@@ -107,8 +109,10 @@ export function truncatePublicErrorMessage(
   maxLength = MAX_PUBLIC_ERROR_MESSAGE_LENGTH,
 ): string {
   const cleaned = message.replace(/\s+/g, " ").trim();
-  if (cleaned.length <= maxLength) return cleaned;
-  return `${cleaned.slice(0, Math.max(0, maxLength - 1))}…`;
+  const known = summarizeRevertSignature(cleaned);
+  const text = known ?? cleaned;
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
 function summarizeRevertSignature(text: string): string | undefined {

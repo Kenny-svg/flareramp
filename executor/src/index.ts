@@ -6,6 +6,11 @@ import {
   createFdcProofDependencies,
   requestPaymentProof,
 } from "./fdcProof";
+import {
+  createFdcPaymentProofDependencies,
+  requestInstructionPaymentProof,
+  resolveOperatorXrplWallets,
+} from "./fdcPaymentProof";
 import { parseExecutorConfig, parseFdcConfig } from "./config";
 import {
   createDirectMintingDependencies,
@@ -13,8 +18,13 @@ import {
   getExecutorClients,
   recoverSubmittedDirectMinting,
 } from "./flareExecutor";
+import {
+  createInstructionExecutorDependencies,
+  executeSmartAccountInstruction,
+} from "./instructionExecutor";
 import { JsonFileTransactionStore } from "./transactionStore";
 import { TransactionProcessor } from "./transactionProcessor";
+import { InstructionProcessor } from "./instructionProcessor";
 import { createLogger } from "./logger";
 import { startHealthServer } from "./healthServer";
 import { JsonFileUserOpStore } from "./userOpStore";
@@ -35,7 +45,13 @@ async function main() {
     executorPrivateKey: config.executorPrivateKey,
   };
   const fdcDependencies = createFdcProofDependencies(runtimeFdcConfig);
+  const paymentFdcDependencies =
+    createFdcPaymentProofDependencies(runtimeFdcConfig);
   const directMintingDependencies = createDirectMintingDependencies(
+    config.executorPrivateKey,
+    config.coston2RpcUrl,
+  );
+  const instructionDependencies = createInstructionExecutorDependencies(
     config.executorPrivateKey,
     config.coston2RpcUrl,
   );
@@ -101,6 +117,38 @@ async function main() {
     },
   );
 
+  const instructionProcessor = new InstructionProcessor(
+    store,
+    {
+      requestProof: (expected, lifecycle, resume) =>
+        requestInstructionPaymentProof(
+          expected,
+          runtimeFdcConfig,
+          paymentFdcDependencies,
+          lifecycle,
+          resume,
+        ),
+      executeInstruction: (proof, xrplAddress, transactionId, onSubmitted) =>
+        executeSmartAccountInstruction(
+          {
+            proof,
+            xrplAddress,
+            transactionId,
+            executorPrivateKey: config.executorPrivateKey,
+            coston2RpcUrl: config.coston2RpcUrl,
+            onSubmitted,
+          },
+          instructionDependencies,
+        ),
+      now: () => Date.now(),
+    },
+    logger,
+    {
+      maxAttempts: config.maxJobAttempts,
+      retryBaseDelayMs: config.jobRetryBaseDelayMs,
+    },
+  );
+
   const healthServer = await startHealthServer(
     config.healthPort,
     () => health,
@@ -111,10 +159,18 @@ async function main() {
         jobs_total: jobs.length,
         jobs_pending: jobs.filter(
           (job) =>
-            !["minted", "failed", "recovery_required"].includes(job.stage),
+            ![
+              "minted",
+              "instruction_executed",
+              "failed",
+              "recovery_required",
+            ].includes(job.stage),
         ).length,
         mints_succeeded_total: jobs.filter((job) => job.stage === "minted")
           .length,
+        instructions_succeeded_total: jobs.filter(
+          (job) => job.stage === "instruction_executed",
+        ).length,
         jobs_failed_total: jobs.filter(
           (job) =>
             job.stage === "failed" || job.stage === "recovery_required",
@@ -125,13 +181,14 @@ async function main() {
     () => store.list(),
   );
   const abortController = new AbortController();
-  const retryTimer = setInterval(
-    () =>
-      void processor.resumePending().catch((error) => {
-        logger.error("resume_pending_failed", { error });
-      }),
-    Math.min(config.jobRetryBaseDelayMs, 5_000),
-  );
+  const retryTimer = setInterval(() => {
+    void processor.resumePending().catch((error) => {
+      logger.error("resume_pending_failed", { error });
+    });
+    void instructionProcessor.resumePending().catch((error) => {
+      logger.error("instruction_resume_pending_failed", { error });
+    });
+  }, Math.min(config.jobRetryBaseDelayMs, 5_000));
   const shutdown = () => {
     abortController.abort();
     clearInterval(retryTimer);
@@ -140,29 +197,82 @@ async function main() {
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);
 
+  let operatorWallets: string[] = [];
+  try {
+    operatorWallets = await resolveOperatorXrplWallets(
+      config.executorPrivateKey,
+      config.coston2RpcUrl,
+    );
+  } catch (error) {
+    logger.error("operator_wallets_resolve_failed", { error });
+  }
+  const envOperator = process.env.WATCHED_OPERATOR_XRPL_ADDRESS?.trim();
+  if (envOperator) {
+    operatorWallets = [envOperator, ...operatorWallets];
+  }
+  const uniqueOperators = [...new Set(operatorWallets.filter(Boolean))];
+
   logger.info("executor_started", {
     executorAddress: account.address,
     watchedXrplAddress: config.watchedXrplAddress,
+    watchedOperatorAddresses: uniqueOperators,
     healthPort: config.healthPort,
   });
   void processor.resumePending().catch((error) => {
     logger.error("startup_recovery_failed", { error });
   });
-  await runReconnectingXrplWatcher(
-    config.xrplWssUrl,
-    config.watchedXrplAddress,
-    (instruction) => processor.observe(instruction).then(() => undefined),
-    {
-      signal: abortController.signal,
-      onConnectionChange: (connected) => {
-        health.watcherConnected = connected;
-        logger.info("xrpl_connection_changed", { connected });
+  void instructionProcessor.resumePending().catch((error) => {
+    logger.error("instruction_startup_recovery_failed", { error });
+  });
+
+  const watchers = [
+    runReconnectingXrplWatcher(
+      config.xrplWssUrl,
+      config.watchedXrplAddress,
+      (instruction) => processor.observe(instruction).then(() => undefined),
+      {
+        signal: abortController.signal,
+        onConnectionChange: (connected) => {
+          health.watcherConnected = connected;
+          logger.info("xrpl_connection_changed", {
+            connected,
+            address: config.watchedXrplAddress,
+          });
+        },
+        onError: (error) => {
+          logger.error("xrpl_watcher_error", {
+            error,
+            address: config.watchedXrplAddress,
+          });
+        },
       },
-      onError: (error) => {
-        logger.error("xrpl_watcher_error", { error });
-      },
-    },
-  );
+    ),
+    ...uniqueOperators.map((operatorAddress) =>
+      runReconnectingXrplWatcher(
+        config.xrplWssUrl,
+        operatorAddress,
+        (instruction) =>
+          instructionProcessor.observe(instruction).then(() => undefined),
+        {
+          signal: abortController.signal,
+          onConnectionChange: (connected) => {
+            logger.info("xrpl_operator_connection_changed", {
+              connected,
+              address: operatorAddress,
+            });
+          },
+          onError: (error) => {
+            logger.error("xrpl_operator_watcher_error", {
+              error,
+              address: operatorAddress,
+            });
+          },
+        },
+      ),
+    ),
+  ];
+
+  await Promise.all(watchers);
 }
 
 main().catch((err) => {

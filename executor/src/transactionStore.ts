@@ -3,6 +3,8 @@ import { dirname } from "node:path";
 import type { Address, Hex } from "viem";
 import type { DirectMintingSettlement } from "./flareExecutor";
 import type { XrpPaymentProof } from "./fdcProof";
+import type { PaymentProof } from "./fdcPaymentProof";
+import type { InstructionSettlement } from "./instructionExecutor";
 import type { IncomingInstruction } from "./xrplWatcher";
 
 export const TRANSACTION_STAGES = [
@@ -13,11 +15,13 @@ export const TRANSACTION_STAGES = [
   "proof_fetched",
   "execution_submitted",
   "minted",
+  "instruction_executed",
   "failed",
   "recovery_required",
 ] as const;
 
 export type TransactionStage = (typeof TRANSACTION_STAGES)[number];
+export type TransactionKind = "mint" | "instruction";
 
 export interface StoredTransactionError {
   code: string;
@@ -28,6 +32,8 @@ export interface StoredTransactionError {
 
 export interface TransactionJob {
   id: string;
+  /** Defaults to mint for jobs created before kind was introduced. */
+  kind?: TransactionKind;
   stage: TransactionStage;
   instruction: IncomingInstruction;
   attempts: number;
@@ -45,13 +51,15 @@ export interface TransactionJob {
     finalized?: boolean;
   };
   proof?: XrpPaymentProof;
+  /** FDC Payment proof for Smart Account executeInstruction jobs. */
+  paymentProof?: PaymentProof;
   execution?: {
     transactionHash: Hex;
     assetManager: Address;
   };
   /** ABI-encoded PackedUserOperation for 0xFE mint+deposit jobs. */
   userOpData?: Hex;
-  settlement?: DirectMintingSettlement;
+  settlement?: DirectMintingSettlement | InstructionSettlement;
   lastError?: StoredTransactionError;
 }
 

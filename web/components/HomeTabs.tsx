@@ -4,7 +4,7 @@ import { useState } from "react";
 import { DirectMintSigning } from "./DirectMintSigning";
 import { PortfolioDashboard } from "./PortfolioDashboard";
 import { LiquidityDashboard } from "./LiquidityDashboard";
-import { RedeemDashboard } from "./RedeemDashboard";
+import { RedeemTabs } from "./RedeemTabs";
 
 type TabId = "mint" | "redeem" | "portfolio" | "liquidity";
 
@@ -49,7 +49,7 @@ export function HomeTabs() {
       </div>
 
       {tab === "mint" && <DirectMintSigning />}
-      {tab === "redeem" && <RedeemDashboard />}
+      {tab === "redeem" && <RedeemTabs />}
       {tab === "portfolio" && <PortfolioDashboard />}
       {tab === "liquidity" && <LiquidityDashboard />}
     </div>

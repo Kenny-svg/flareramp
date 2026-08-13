@@ -144,6 +144,7 @@ function hasProof(job: PublicExecutorJob | null): boolean {
         "proof_fetched",
         "execution_submitted",
         "minted",
+        "instruction_executed",
       ].includes(job.stage),
   );
 }
@@ -263,12 +264,15 @@ export function diagnoseReceipt(
     job.stage === "failed" ||
     job.stage === "recovery_required"
   ) {
+    const instructionJob = job.kind === "instruction";
     return {
       severity: "error",
       title:
         job.stage === "failed"
           ? "Executor retries are exhausted"
-          : "Direct mint requires manual recovery",
+          : instructionJob
+            ? "Smart Account instruction requires manual recovery"
+            : "Direct mint requires manual recovery",
       evidence: [
         job.error
           ? `${job.error.code}: ${
@@ -278,11 +282,16 @@ export function diagnoseReceipt(
             }`
           : "No structured executor error was checkpointed.",
       ],
-      guidance: [
-        "Inspect the recorded FDC proof and Flare execution checkpoint before retrying the same payment.",
-        "Use the normal executeDirectMinting path for this 48-byte direct-mint memo.",
-        "Do not apply 0xE0; it is only defined for failed Smart Accounts custom-instruction mints.",
-      ],
+      guidance: instructionJob
+        ? [
+            "Inspect the FDC Payment proof and MasterAccountController.executeInstruction checkpoint.",
+            "Do not resend the XRPL payment; recover the same instruction payment if needed.",
+          ]
+        : [
+            "Inspect the recorded FDC proof and Flare execution checkpoint before retrying the same payment.",
+            "Use the normal executeDirectMinting path for this 48-byte direct-mint memo.",
+            "Do not apply 0xE0; it is only defined for failed Smart Accounts custom-instruction mints.",
+          ],
     };
   }
   return {
@@ -290,13 +299,17 @@ export function diagnoseReceipt(
     title:
       job.stage === "minted"
         ? "Public evidence confirms the mint"
-        : "Mint is progressing normally",
+        : job.stage === "instruction_executed"
+          ? "Public evidence confirms the Smart Account instruction"
+          : job.kind === "instruction"
+            ? "Smart Account instruction is progressing normally"
+            : "Mint is progressing normally",
     evidence: [
       `Current durable stage: ${job.stage}.`,
       `Executor attempts: ${job.attempts}.`,
     ],
     guidance:
-      job.stage === "minted"
+      job.stage === "minted" || job.stage === "instruction_executed"
         ? ["No recovery action is required."]
         : ["Keep this receipt open; the executor resumes from its latest checkpoint."],
   };
@@ -324,12 +337,16 @@ export async function buildProofReceipt(
     xrplResult?.timestamp ??
     job?.stageHistory[0]?.at ??
     generatedAt;
+  const instructionJob = job?.kind === "instruction";
   const endTimestamp =
-    stageTimestamp(job, "minted") ?? generatedAt;
+    stageTimestamp(job, "minted") ??
+    stageTimestamp(job, "instruction_executed") ??
+    generatedAt;
   const fdcTimestamp =
     stageTimestamp(job, "attestation_requested");
   const flareTimestamp =
     stageTimestamp(job, "minted") ??
+    stageTimestamp(job, "instruction_executed") ??
     stageTimestamp(job, "execution_submitted");
   const xrplExplorerUrl =
     `https://testnet.xrpl.org/transactions/${normalized}`;
@@ -348,14 +365,18 @@ export async function buildProofReceipt(
   ];
   if (fdcHash) {
     sources.push({
-      label: "FDC attestation request",
+      label: instructionJob
+        ? "FDC Payment attestation request"
+        : "FDC attestation request",
       url: `https://coston2-explorer.flare.network/tx/${fdcHash}`,
       timestamp: fdcTimestamp ?? job?.updatedAt ?? generatedAt,
     });
   }
   if (flareHash) {
     sources.push({
-      label: "Coston2 direct-mint execution",
+      label: instructionJob
+        ? "Coston2 executeInstruction"
+        : "Coston2 direct-mint execution",
       url: `https://coston2-explorer.flare.network/tx/${flareHash}`,
       timestamp: flareTimestamp ?? job?.updatedAt ?? generatedAt,
     });
@@ -403,7 +424,10 @@ export async function buildProofReceipt(
       timestamp: flareTimestamp,
     },
     fxrp: {
-      recipient: job?.settlement?.recipient ?? null,
+      recipient:
+        job?.settlement?.recipient ??
+        job?.settlement?.personalAccount ??
+        null,
       receivedUBA: job?.settlement?.mintedAmountUBA ?? null,
       mintingFeeUBA: job?.settlement?.mintingFeeUBA ?? null,
       executorFeeUBA: job?.settlement?.executorFeeUBA ?? null,
@@ -414,8 +438,9 @@ export async function buildProofReceipt(
       source: "FlareRamp durable executor checkpoint",
     })),
     diagnosis: diagnoseReceipt(job, executor.reachable, Date.now()),
-    recoveryBoundary:
-      "0xE0 is not applicable to this plain 48-byte direct mint. It is only an official recovery instruction for failed Smart Accounts 0xFE/0xFF executeDirectMintingWithData flows.",
+    recoveryBoundary: instructionJob
+      ? "This receipt is for a proof-based Smart Account instruction (operator XRPL payment → FDC Payment → executeInstruction). Do not confuse it with Core Vault mint recovery (0xE0)."
+      : "0xE0 is not applicable to this plain 48-byte direct mint. It is only an official recovery instruction for failed Smart Accounts 0xFE/0xFF executeDirectMintingWithData flows.",
     sources,
   };
 }

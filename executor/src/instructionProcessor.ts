@@ -1,17 +1,18 @@
 import type { Address, Hex } from "viem";
 import {
-  DirectMintingError,
-  truncatePublicErrorMessage,
-  type DirectMintingSettlement,
-  type SubmittedDirectMinting,
-} from "./flareExecutor";
-import {
   FdcProofError,
-  type ExpectedXrpPayment,
-  type FdcProofLifecycle,
   type FdcProofResumeState,
-  type XrpPaymentProof,
+  type SubmittedAttestation,
 } from "./fdcProof";
+import type {
+  ExpectedInstructionPayment,
+  PaymentProof,
+} from "./fdcPaymentProof";
+import {
+  InstructionExecutorError,
+  type InstructionSettlement,
+} from "./instructionExecutor";
+import { truncatePublicErrorMessage } from "./flareExecutor";
 import type { StructuredLogger } from "./logger";
 import {
   type TransactionJob,
@@ -21,38 +22,38 @@ import {
 import type { IncomingInstruction } from "./xrplWatcher";
 
 const TERMINAL_STAGES = new Set<TransactionStage>([
-  "minted",
   "instruction_executed",
   "failed",
   "recovery_required",
 ]);
 
-export interface TransactionProcessorDependencies {
+export interface InstructionProcessorDependencies {
   requestProof(
-    expected: ExpectedXrpPayment,
-    lifecycle: FdcProofLifecycle,
+    expected: ExpectedInstructionPayment,
+    lifecycle: {
+      onPrepared?: (request: Hex) => void | Promise<void>;
+      onAttestationRequested?: (
+        submitted: SubmittedAttestation,
+        request: Hex,
+      ) => void | Promise<void>;
+      onFinalized?: (votingRoundId: bigint) => void | Promise<void>;
+      onProofFetched?: (proof: PaymentProof) => void | Promise<void>;
+    },
     resume: FdcProofResumeState,
-  ): Promise<XrpPaymentProof>;
-  executeMinting(
-    proof: XrpPaymentProof,
-    expected: ExpectedXrpPayment,
+  ): Promise<PaymentProof>;
+  executeInstruction(
+    proof: PaymentProof,
+    xrplAddress: string,
+    transactionId: Hex,
     onSubmitted: (
       transactionHash: Hex,
-      assetManager: Address,
+      controller: Address,
     ) => void | Promise<void>,
-    userOpData?: Hex,
-  ): Promise<DirectMintingSettlement>;
-  recoverMinting(
-    submission: SubmittedDirectMinting,
-    proof: XrpPaymentProof,
-  ): Promise<DirectMintingSettlement>;
-  /** Resolve off-chain 0xFE userOp bytes for a Core Vault payment memo. */
-  resolveUserOp?(instruction: IncomingInstruction): Promise<Hex | undefined>;
+  ): Promise<InstructionSettlement>;
   now(): number;
 }
 
-export interface TransactionProcessorOptions {
-  proofOwner: Address;
+export interface InstructionProcessorOptions {
   maxAttempts?: number;
   retryBaseDelayMs?: number;
   autoProcessObserved?: boolean;
@@ -62,18 +63,21 @@ function normalizeTransactionId(value: string): string {
   return value.replace(/^0x/i, "").toUpperCase();
 }
 
-function expectedPayment(
+function expectedInstruction(
   job: TransactionJob,
-  proofOwner: Address,
-): ExpectedXrpPayment {
+): ExpectedInstructionPayment {
+  if (!job.instruction.memoHex) {
+    throw new FdcProofError(
+      "INVALID_INPUT",
+      "Instruction payment is missing the 32-byte memo",
+    );
+  }
   return {
     transactionId: job.instruction.txHash,
-    proofOwner,
     sourceAddress: job.instruction.sourceXrplAddress,
     destinationAddress: job.instruction.destinationXrplAddress,
     amountDrops: job.instruction.amountDrops,
     memoData: job.instruction.memoHex,
-    destinationTag: job.instruction.destinationTag,
   };
 }
 
@@ -82,26 +86,17 @@ function errorDetails(error: unknown): {
   message: string;
   retryable: boolean;
 } {
-  if (error instanceof DirectMintingError) {
+  if (error instanceof InstructionExecutorError) {
     const permanent = new Set([
-      "PAYMENT_MISMATCH",
       "ALREADY_EXECUTED",
-      "CHECKPOINT_FAILED",
       "EXECUTION_REVERTED",
-      "PAYMENT_TOO_SMALL",
       "UNEXPECTED_OUTCOME",
+      "SIMULATION_FAILED",
     ]);
-    // Vault CallFailed / bad userOp will not heal on retry — stop quickly.
-    const simulationPermanent = /CallFailed|hash mismatch|WrongExecutor/i.test(
-      error.message,
-    );
     return {
       code: error.code,
       message: truncatePublicErrorMessage(error.message),
-      retryable:
-        error.code === "SIMULATION_FAILED"
-          ? !simulationPermanent
-          : !permanent.has(error.code),
+      retryable: !permanent.has(error.code),
     };
   }
   if (error instanceof FdcProofError) {
@@ -124,16 +119,16 @@ function errorDetails(error: unknown): {
   };
 }
 
-export class TransactionProcessor {
+export class InstructionProcessor {
   private readonly active = new Set<string>();
   private readonly maxAttempts: number;
   private readonly retryBaseDelayMs: number;
 
   constructor(
     private readonly store: TransactionStore,
-    private readonly dependencies: TransactionProcessorDependencies,
+    private readonly dependencies: InstructionProcessorDependencies,
     private readonly logger: StructuredLogger,
-    private readonly options: TransactionProcessorOptions,
+    private readonly options: InstructionProcessorOptions = {},
   ) {
     this.maxAttempts = options.maxAttempts ?? 5;
     this.retryBaseDelayMs = options.retryBaseDelayMs ?? 5_000;
@@ -142,13 +137,32 @@ export class TransactionProcessor {
   async observe(instruction: IncomingInstruction): Promise<{
     job: TransactionJob;
     created: boolean;
-  }> {
+  } | null> {
+    const memo = instruction.memoHex.toLowerCase();
+    // CRT / proof-based instructions are exactly 32 bytes and are not FAssets
+    // direct-mint FBPR / 0xFE memos.
+    if (
+      memo.length !== 66 ||
+      memo.startsWith("0x46425052") ||
+      memo.startsWith("0xfe") ||
+      memo.startsWith("0xff") ||
+      memo.startsWith("0xe0") ||
+      memo.startsWith("0xe1") ||
+      memo.startsWith("0xe2")
+    ) {
+      return null;
+    }
+    if (instruction.destinationTag !== null) {
+      this.logger.error("instruction_rejected_destination_tag", {
+        transactionId: instruction.txHash,
+      });
+      return null;
+    }
     const now = this.dependencies.now();
     const id = normalizeTransactionId(instruction.txHash);
-    const userOpData = await this.dependencies.resolveUserOp?.(instruction);
     const result = await this.store.createIfAbsent({
       id,
-      kind: "mint",
+      kind: "instruction",
       stage: "observed",
       instruction,
       attempts: 0,
@@ -156,22 +170,21 @@ export class TransactionProcessor {
       createdAt: now,
       updatedAt: now,
       stageHistory: [{ stage: "observed", at: now }],
-      userOpData,
     });
-    if (result.created === false && userOpData && !result.job.userOpData) {
-      await this.store.update(id, (job) => ({ ...job, userOpData }));
-    }
-    this.logger.info(result.created ? "transaction_observed" : "duplicate_event", {
-      transactionId: id,
-      stage: result.job.stage,
-      hasUserOp: Boolean(userOpData ?? result.job.userOpData),
-    });
+    this.logger.info(
+      result.created ? "instruction_observed" : "duplicate_instruction_event",
+      {
+        transactionId: id,
+        stage: result.job.stage,
+        memo: instruction.memoHex,
+      },
+    );
     if (
       this.options.autoProcessObserved !== false &&
       !TERMINAL_STAGES.has(result.job.stage)
     ) {
       void this.process(id).catch((error) => {
-        this.logger.error("transaction_process_crashed", {
+        this.logger.error("instruction_process_crashed", {
           transactionId: id,
           error,
         });
@@ -187,7 +200,7 @@ export class TransactionProcessor {
       jobs
         .filter(
           (job) =>
-            (job.kind ?? "mint") === "mint" &&
+            (job.kind ?? "mint") === "instruction" &&
             !TERMINAL_STAGES.has(job.stage) &&
             (job.nextAttemptAt === null || job.nextAttemptAt <= now),
         )
@@ -201,7 +214,7 @@ export class TransactionProcessor {
     try {
       let job = await this.store.get(id);
       if (!job || TERMINAL_STAGES.has(job.stage)) return;
-      if ((job.kind ?? "mint") !== "mint") return;
+      if ((job.kind ?? "mint") !== "instruction") return;
       if (
         job.nextAttemptAt !== null &&
         job.nextAttemptAt > this.dependencies.now()
@@ -213,8 +226,8 @@ export class TransactionProcessor {
         nextAttemptAt: null,
       });
 
-      const expected = expectedPayment(job, this.options.proofOwner);
-      let proof = job.proof;
+      const expected = expectedInstruction(job);
+      let proof = job.paymentProof;
       if (!proof) {
         proof = await this.dependencies.requestProof(
           expected,
@@ -247,7 +260,7 @@ export class TransactionProcessor {
             onProofFetched: async (fetchedProof) => {
               job = await this.checkpoint(id, {
                 stage: "proof_fetched",
-                proof: fetchedProof,
+                paymentProof: fetchedProof,
               });
             },
           },
@@ -267,38 +280,33 @@ export class TransactionProcessor {
         );
       }
 
-      let settlement: DirectMintingSettlement;
-      if (job.execution) {
-        settlement = await this.dependencies.recoverMinting(
-          job.execution,
-          proof,
-        );
-      } else {
-        settlement = await this.dependencies.executeMinting(
-          proof,
-          expected,
-          async (transactionHash, assetManager) => {
-            job = await this.checkpoint(id, {
-              stage: "execution_submitted",
-              proof,
-              execution: { transactionHash, assetManager },
-            });
-          },
-          job.userOpData,
-        );
-      }
+      const settlement = await this.dependencies.executeInstruction(
+        proof,
+        job.instruction.sourceXrplAddress,
+        `0x${normalizeTransactionId(job.instruction.txHash)}` as Hex,
+        async (transactionHash, controller) => {
+          job = await this.checkpoint(id, {
+            stage: "execution_submitted",
+            paymentProof: proof,
+            execution: {
+              transactionHash,
+              assetManager: controller,
+            },
+          });
+        },
+      );
 
       await this.checkpoint(id, {
-        stage: "minted",
-        proof,
+        stage: "instruction_executed",
+        paymentProof: proof,
         settlement,
         lastError: undefined,
         nextAttemptAt: null,
       });
-      this.logger.info("transaction_minted", {
+      this.logger.info("instruction_executed", {
         transactionId: id,
         flareTransactionHash: settlement.flareTransactionHash,
-        mintedAmountUBA: settlement.mintedAmountUBA.toString(),
+        instructionId: settlement.instructionId.toString(),
       });
     } catch (error) {
       await this.recordFailure(id, error);
@@ -326,6 +334,7 @@ export class TransactionProcessor {
       return {
         ...job,
         ...changes,
+        kind: "instruction",
         stageHistory,
         updatedAt: now,
       };
@@ -333,6 +342,7 @@ export class TransactionProcessor {
     this.logger.info("transaction_stage_changed", {
       transactionId: id,
       stage: updated.stage,
+      kind: "instruction",
     });
     return updated;
   }
@@ -343,60 +353,28 @@ export class TransactionProcessor {
     if (!job) return;
     const attempts = job.attempts + 1;
     const exhausted = attempts >= this.maxAttempts;
-    let stage: TransactionStage = !details.retryable
+    const stage: TransactionStage = !details.retryable
       ? "recovery_required"
       : exhausted
         ? "failed"
         : job.stage;
     const delay = this.retryBaseDelayMs * 2 ** Math.max(0, attempts - 1);
-    let nextAttemptAt =
+    const nextAttemptAt =
       details.retryable && !exhausted
         ? this.dependencies.now() + delay
         : null;
-    let execution = job.execution;
-
-    if (
-      error instanceof DirectMintingError &&
-      error.code === "MINTING_DELAYED" &&
-      !exhausted
-    ) {
-      stage = "proof_fetched";
-      execution = undefined;
-      const allowedAt = error.details?.executionAllowedAt;
-      if (typeof allowedAt === "bigint") {
-        nextAttemptAt = Math.max(nextAttemptAt ?? 0, Number(allowedAt) * 1_000);
-      }
-    }
-    if (
-      error instanceof DirectMintingError &&
-      error.code === "CHECKPOINT_FAILED"
-    ) {
-      const transactionHash = error.details?.transactionHash;
-      const assetManager = error.details?.assetManager;
-      if (
-        typeof transactionHash === "string" &&
-        typeof assetManager === "string"
-      ) {
-        execution = {
-          transactionHash: transactionHash as Hex,
-          assetManager: assetManager as Address,
-        };
-        stage = "execution_submitted";
-        nextAttemptAt = this.dependencies.now() + delay;
-      }
-    }
-
     await this.checkpoint(id, {
       stage,
       attempts,
-      execution,
       nextAttemptAt,
       lastError: {
-        ...details,
+        code: details.code,
+        message: details.message,
+        retryable: details.retryable,
         occurredAt: this.dependencies.now(),
       },
     });
-    this.logger.error("transaction_processing_failed", {
+    this.logger.error("instruction_processing_failed", {
       transactionId: id,
       stage,
       attempt: attempts,
