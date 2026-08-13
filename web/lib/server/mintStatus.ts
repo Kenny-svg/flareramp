@@ -26,11 +26,13 @@ type ExecutorStage =
   | "proof_fetched"
   | "execution_submitted"
   | "minted"
+  | "instruction_executed"
   | "failed"
   | "recovery_required";
 
 export interface PublicExecutorJob {
   transactionId: string;
+  kind?: "mint" | "instruction";
   stage: Exclude<ExecutorStage, "waiting_for_executor">;
   attempts: number;
   createdAt: string;
@@ -57,11 +59,14 @@ export interface PublicExecutorJob {
   settlement?: {
     flareTransactionHash: string;
     blockNumber: string;
-    recipient: string;
-    executor: string;
-    mintedAmountUBA: string;
-    mintingFeeUBA: string;
-    executorFeeUBA: string;
+    recipient?: string;
+    executor?: string;
+    mintedAmountUBA?: string;
+    mintingFeeUBA?: string;
+    executorFeeUBA?: string;
+    personalAccount?: string;
+    instructionId?: string;
+    xrplOwner?: string;
   };
   error?: {
     code: string;
@@ -142,6 +147,12 @@ function stagePresentation(stage: ExecutorStage): Pick<
         message: "FXRP mint completed",
         expectedTiming: "Complete",
       };
+    case "instruction_executed":
+      return {
+        phase: "complete",
+        message: "Smart Account instruction executed on Coston2",
+        expectedTiming: "Complete",
+      };
     case "failed":
     case "recovery_required":
       return {
@@ -149,7 +160,7 @@ function stagePresentation(stage: ExecutorStage): Pick<
         message:
           stage === "failed"
             ? "Executor stopped after a non-retryable failure"
-            : "Mint requires executor recovery",
+            : "Job requires executor recovery",
         expectedTiming: "Review the reported executor error",
       };
   }

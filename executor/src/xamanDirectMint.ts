@@ -24,6 +24,32 @@ export interface DirectMintPaymentTemplate {
   memoData: Hex;
 }
 
+/** XRPL Payment to the Smart Accounts operator with a 32-byte CRT instruction memo. */
+export interface InstructionPaymentTemplate {
+  sourceAddress: string;
+  destinationAddress: string;
+  amountDrops: string;
+  memoData: Hex;
+  forbidDestinationTag?: boolean;
+  customInstruction?: string;
+}
+
+export type XamanPaymentTemplate =
+  | DirectMintPaymentTemplate
+  | InstructionPaymentTemplate;
+
+function isInstructionTemplate(
+  template: XamanPaymentTemplate,
+): template is InstructionPaymentTemplate {
+  return "destinationAddress" in template;
+}
+
+function destinationOf(template: XamanPaymentTemplate): string {
+  return isInstructionTemplate(template)
+    ? template.destinationAddress
+    : template.coreVaultAddress;
+}
+
 export interface XamanSigningRequest {
   payloadId: string;
   deepLink: string;
@@ -73,7 +99,7 @@ export interface XamanDirectMintDependencies {
   payload: XamanPayloadGateway;
   validateSubmittedPayment(
     transactionId: string,
-    expected: DirectMintPaymentTemplate,
+    expected: XamanPaymentTemplate,
   ): Promise<"validated" | "pending">;
 }
 
@@ -100,7 +126,7 @@ export function buildDirectMintingMemo(
 
 function paymentTemplateFromPayload(
   payload: PayloadResponse,
-): DirectMintPaymentTemplate | null {
+): XamanPaymentTemplate | null {
   const transaction = payload.payload.request_json;
   const memos = transaction.Memos;
   const firstMemo =
@@ -164,6 +190,16 @@ function paymentTemplateFromPayload(
         memoData: memo,
       };
     }
+    // 32-byte CRT / proof-based Smart Account instruction memo.
+    if (body.length === 64) {
+      return {
+        sourceAddress: transaction.Account,
+        destinationAddress: transaction.Destination,
+        amountDrops: transaction.Amount,
+        memoData: memo,
+        forbidDestinationTag: true,
+      };
+    }
   } catch {
     return null;
   }
@@ -172,7 +208,7 @@ function paymentTemplateFromPayload(
 
 export function verifySubmittedPayment(
   response: TxResponse<Payment>,
-  expected: DirectMintPaymentTemplate,
+  expected: XamanPaymentTemplate,
 ): void {
   const transaction = response.result;
   const memo = transaction.Memos?.[0]?.Memo?.MemoData;
@@ -183,14 +219,24 @@ export function verifySubmittedPayment(
   if (!transaction.validated || result !== "tesSUCCESS") {
     throw new Error("XRPL payment is not validated with tesSUCCESS");
   }
+  const expectedDestination = destinationOf(expected);
   if (
     transaction.TransactionType !== "Payment" ||
     transaction.Account !== expected.sourceAddress ||
-    transaction.Destination !== expected.coreVaultAddress ||
+    transaction.Destination !== expectedDestination ||
     transaction.Amount !== expected.amountDrops ||
     `0x${memo ?? ""}`.toLowerCase() !== expected.memoData.toLowerCase()
   ) {
     throw new Error("Signed XRPL payment differs from the approved template");
+  }
+  if (
+    isInstructionTemplate(expected) &&
+    expected.forbidDestinationTag !== false &&
+    transaction.DestinationTag !== undefined
+  ) {
+    throw new Error(
+      "Smart Account instruction payments must not include a destination tag",
+    );
   }
 }
 
@@ -199,13 +245,17 @@ export function createXamanDirectMintService(
 ) {
   return {
     async create(
-      template: DirectMintPaymentTemplate,
+      template: XamanPaymentTemplate,
     ): Promise<XamanSigningRequest> {
+      const instructionText = isInstructionTemplate(template)
+        ? template.customInstruction ??
+          `Smart Account instruction. Confirm ${template.amountDrops} drops to the operator and the 32-byte memo before signing.`
+        : `Mint FXRP to ${template.recipient}. Confirm ${template.amountDrops} drops and the verified Core Vault before signing.`;
       const created = await dependencies.payload.create({
         txjson: {
           TransactionType: "Payment",
           Account: template.sourceAddress,
-          Destination: template.coreVaultAddress,
+          Destination: destinationOf(template),
           Amount: template.amountDrops,
           Memos: [
             {
@@ -223,8 +273,7 @@ export function createXamanDirectMintService(
         },
         custom_meta: {
           identifier: `flareramp-${Date.now()}`,
-          instruction:
-            `Mint FXRP to ${template.recipient}. Confirm ${template.amountDrops} drops and the verified Core Vault before signing.`,
+          instruction: instructionText,
         },
       });
       if (!created) {

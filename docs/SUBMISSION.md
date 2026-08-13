@@ -13,6 +13,8 @@
 - [ ] Recorded replay enabled and clearly labeled.
 - [ ] Demo video distinguishes live execution from recorded replay.
 - [ ] README claims match the deployed interface.
+- [ ] XRPL-native Smart Account redeem / vault exit demoed (or clearly labeled
+      if environment lacks operator wallet liquidity).
 
 ## Public repository instructions
 

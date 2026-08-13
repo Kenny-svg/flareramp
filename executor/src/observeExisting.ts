@@ -153,14 +153,22 @@ async function main() {
       JSON.stringify(
         {
           stage: finalJob?.stage,
-          settlement: finalJob?.settlement
-            ? {
-                flareTransactionHash:
-                  finalJob.settlement.flareTransactionHash,
-                mintedAmountUBA:
-                  finalJob.settlement.mintedAmountUBA.toString(),
-              }
-            : undefined,
+          settlement:
+            finalJob?.settlement?.status === "executed"
+              ? {
+                  flareTransactionHash:
+                    finalJob.settlement.flareTransactionHash,
+                  mintedAmountUBA:
+                    finalJob.settlement.mintedAmountUBA.toString(),
+                }
+              : finalJob?.settlement?.status === "instruction_executed"
+                ? {
+                    flareTransactionHash:
+                      finalJob.settlement.flareTransactionHash,
+                    instructionId:
+                      finalJob.settlement.instructionId.toString(),
+                  }
+                : undefined,
           error: finalJob?.lastError,
         },
         null,

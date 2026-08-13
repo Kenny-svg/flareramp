@@ -21,6 +21,33 @@ export const FIRELIGHT_VAULT_ABI = [
     ],
     outputs: [{ name: "shares", type: "uint256" }],
   },
+  {
+    type: "function",
+    name: "currentPeriod",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "withdrawalsOf",
+    stateMutability: "view",
+    inputs: [
+      { name: "period", type: "uint256" },
+      { name: "account", type: "address" },
+    ],
+    outputs: [{ type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "isWithdrawClaimed",
+    stateMutability: "view",
+    inputs: [
+      { name: "period", type: "uint256" },
+      { name: "account", type: "address" },
+    ],
+    outputs: [{ type: "bool" }],
+  },
 ] as const;
 
 /**

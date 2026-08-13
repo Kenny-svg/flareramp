@@ -135,16 +135,20 @@ export function encodeFirelightRedeem(params: {
   });
 }
 
-/** 0x13 — Claim a completed Firelight withdrawal. */
+/**
+ * 0x13 — Claim a completed Firelight withdrawal.
+ * `period` is the Firelight vault period id from the prior redeem request
+ * (not an FXRP amount). See Flare FAsset instructions: claim withdraw value.
+ */
 export function encodeFirelightClaimWithdraw(params: {
-  amountFxrp: bigint;
+  period: bigint;
   vaultId: number;
   walletId?: number;
 }): Hex {
   return buildInstruction({
     instructionId: 0x13,
     walletId: params.walletId,
-    value: params.amountFxrp,
+    value: params.period,
     params: vaultIdParams(params.vaultId),
   });
 }

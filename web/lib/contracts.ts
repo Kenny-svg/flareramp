@@ -103,6 +103,31 @@ export const MASTER_ACCOUNT_CONTROLLER_ABI = [
     inputs: [],
     outputs: [{ name: "", type: "string[]" }],
   },
+  {
+    type: "function",
+    name: "getInstructionFee",
+    stateMutability: "view",
+    inputs: [{ name: "_instructionId", type: "uint256" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "getDefaultInstructionFee",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "getVaults",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [
+      { name: "_vaultIds", type: "uint256[]" },
+      { name: "_vaultAddresses", type: "address[]" },
+      { name: "_vaultTypes", type: "uint8[]" },
+    ],
+  },
 ] as const;
 
 // Standard ERC-20 reads — safe to hand-write, no struct decoding involved.

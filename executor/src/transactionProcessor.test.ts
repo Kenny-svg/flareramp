@@ -145,7 +145,11 @@ describe("TransactionProcessor persistence and idempotency", () => {
 
     const recovered = await restartedStore.get(JOB_ID);
     expect(recovered?.stage).toBe("minted");
-    expect(recovered?.settlement?.mintedAmountUBA).toBe(800_000n);
+    expect(
+      recovered?.settlement?.status === "executed"
+        ? recovered.settlement.mintedAmountUBA
+        : undefined,
+    ).toBe(800_000n);
     expect(deps.recoverMinting).toHaveBeenCalledWith(
       {
         transactionHash: FLARE_TRANSACTION_HASH,

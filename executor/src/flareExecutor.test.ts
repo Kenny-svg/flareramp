@@ -224,6 +224,14 @@ describe("truncatePublicErrorMessage", () => {
     );
   });
 
+  it("maps Firelight NoWithdrawalAmount selector", () => {
+    const mapped = truncatePublicErrorMessage(
+      'executeInstruction reverted with the following signature: 0x95dece8d',
+    );
+    expect(mapped).toContain("NoWithdrawalAmount");
+    expect(mapped).toContain("period");
+  });
+
   it("collapses whitespace and truncates long dumps", () => {
     const dump = `SIMULATION_FAILED: failed\n\n${"0xab".repeat(400)}`;
     const truncated = truncatePublicErrorMessage(dump);
